@@ -8,16 +8,10 @@ on:
 
 jobs:
   build:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows-latest
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
+    env:
+      RELEASES_REPO: wazidchoudhary/apex-engineer-releases
+      INSTALLER_NAME: Apex-Engineer-Windows-x64-Setup.exe
 
     steps:
       - name: Checkout
@@ -37,19 +31,63 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install dependencies
+      - name: Install npm dependencies
         run: npm ci
 
-      - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Tauri bundle (signed)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $sig = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe.sig | Select-Object -First 1
+          if (-not $exe) { throw 'NSIS installer not found in src-tauri/target/release/bundle/nsis/' }
+          if (-not $sig) { throw '.sig file not found - check createUpdaterArtifacts and signing secrets' }
+          Copy-Item $exe.FullName (Join-Path 'release-assets' $env:INSTALLER_NAME)
+          Copy-Item $sig.FullName (Join-Path 'release-assets' "$($env:INSTALLER_NAME).sig")
+
+      - name: Generate latest.json
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ github.ref_name }}'
+          $version = $tag -replace '^v',''
+          $sigPath = Join-Path 'release-assets' "$($env:INSTALLER_NAME).sig"
+          $sig = (Get-Content $sigPath -Raw).Trim()
+          $url = "https://github.com/$($env:RELEASES_REPO)/releases/download/$tag/$($env:INSTALLER_NAME)"
+          $payload = [ordered]@{
+            version  = $version
+            notes    = "Apex Engineer $tag"
+            pub_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            platforms = [ordered]@{
+              'windows-x86_64' = [ordered]@{
+                signature = $sig
+                url       = $url
+              }
+            }
+          }
+          $json = $payload | ConvertTo-Json -Depth 5
+          Set-Content -Path 'release-assets/latest.json' -Value $json -Encoding utf8 -NoNewline
+
+      - name: Publish release to public releases repo
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Apex Engineer ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download and install this version.'
-          releaseDraft: true
+          repository: ${{ env.RELEASES_REPO }}
+          token: ${{ secrets.RELEASES_REPO_PAT }}
+          tag_name: ${{ github.ref_name }}
+          name: Apex Engineer ${{ github.ref_name }}
+          body: |
+            Apex Engineer ${{ github.ref_name }}.
+            Download the Windows installer below. Existing installs will auto-update on next launch.
+          draft: false
           prerelease: false
-          args: ${{ matrix.args }}
+          files: |
+            release-assets/${{ env.INSTALLER_NAME }}
+            release-assets/${{ env.INSTALLER_NAME }}.sig
+            release-assets/latest.json
