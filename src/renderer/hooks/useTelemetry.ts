@@ -70,7 +70,7 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
     let active = true;
 
     const register = async () => {
-      const fns = await Promise.all([
+      const results = await Promise.allSettled([
         onTelemetryStartedFor(slot, () => setState((s) => ({ ...s, connected: true }))),
         onTelemetryStoppedFor(slot, () => setState((s) => ({ ...s, connected: false }))),
         onTelemetryErrorFor(slot, () => setState((s) => ({ ...s, connected: false }))),
@@ -138,6 +138,11 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
         }),
       ]);
 
+      const fns: Array<() => void> = [];
+      for (const r of results) {
+        if (r.status === 'fulfilled') fns.push(r.value);
+        else console.error('useTelemetry register failed:', r.reason);
+      }
       if (active) unlisteners.push(...fns);
       else fns.forEach((fn) => fn());
     };

@@ -210,8 +210,41 @@ export interface StrategyDecision {
 // ── Event listeners (slot-aware) ──────────────────────────────────────────────
 // `onFoo(cb)` binds to the primary slot. `onFooFor(slot, cb)` targets another.
 
-function bind<T>(base: string, slot: string, cb: (d: T) => void) {
-  return listen<T>(eventName(base, slot), (e) => cb(e.payload));
+const NOOP_UNLISTEN: UnlistenFn = () => {};
+
+// Tauri 2 injects window.__TAURI_INTERNALS__ before page scripts run, but in
+// dev mode with HMR / strict-mode double-mount the React effect can fire
+// before the injection completes. Without this guard, listen() throws
+// "Cannot read properties of undefined (reading 'transformCallback')",
+// Promise.all short-circuits, and the renderer stays deaf to every event.
+async function waitForTauriIpc(maxWaitMs = 5000): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as { __TAURI_INTERNALS__?: { transformCallback?: unknown } };
+  if (w.__TAURI_INTERNALS__?.transformCallback) return true;
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (w.__TAURI_INTERNALS__?.transformCallback) return true;
+  }
+  return false;
+}
+
+async function bind<T>(base: string, slot: string, cb: (d: T) => void): Promise<UnlistenFn> {
+  const ready = await waitForTauriIpc();
+  if (!ready) {
+    console.error(
+      `[tauri-api] IPC bridge unavailable — cannot register listener for "${eventName(base, slot)}". ` +
+      'window.__TAURI_INTERNALS__ never appeared. This window is not a Tauri webview ' +
+      '(opened in a regular browser?) or the IPC injection failed.'
+    );
+    return NOOP_UNLISTEN;
+  }
+  try {
+    return await listen<T>(eventName(base, slot), (e) => cb(e.payload));
+  } catch (err) {
+    console.error(`[tauri-api] listen("${eventName(base, slot)}") failed:`, err);
+    return NOOP_UNLISTEN;
+  }
 }
 
 export const onTelemetryStarted   = (cb: (d: any) => void) => bind<any>('telemetry-started', PRIMARY_SLOT, cb);
