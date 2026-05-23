@@ -22,7 +22,10 @@
   --sidebar-w: 220px;
   --radius: 8px;
   --gap: 12px;
-  font-family: 'Segoe UI', 'Inter', -apple-system, sans-serif;
+  --font-sans: 'Inter', 'Segoe UI Variable', 'Segoe UI', -apple-system,
+    BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-sans);
   color-scheme: dark;
 }
 
@@ -32,12 +35,32 @@
   padding: 0;
 }
 
+html, body {
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01', 'ss03', 'cv02', 'tnum';
+  font-variant-ligatures: common-ligatures;
+  letter-spacing: -0.005em;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+  font-feature-settings: 'calt' 1, 'liga' 0;
+}
+
+input, select, textarea, button {
+  font-family: inherit;
+  font-feature-settings: inherit;
+  letter-spacing: inherit;
 }
 
 /* ── App Shell ── */

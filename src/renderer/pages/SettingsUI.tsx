@@ -33,10 +33,22 @@ const TRACK_NAMES: Record<number, string> = {
 };
 
 export function Settings() {
-  const { connected, session } = useTelemetryContext();
+  const { connected, session, startTelemetry, stopTelemetry } = useTelemetryContext();
   const prefs = usePrefs();
 
-  const [port, setPort] = useState(20777);
+  const port = prefs.telemetryPorts[0] ?? 20777;
+  const setPort = useCallback((next: number) => {
+    const safe = Number.isFinite(next) && next > 0 ? next : 20777;
+    const nextPorts = [safe, ...prefs.telemetryPorts.slice(1)];
+    prefs.setPrefs({ telemetryPorts: nextPorts });
+    // Hot-restart the primary listener so the change takes effect immediately.
+    if (connected) {
+      try { stopTelemetry(); } catch { /* ignore */ }
+      // small delay so the backend releases the socket before we re-bind
+      setTimeout(() => { try { startTelemetry(safe); } catch { /* ignore */ } }, 150);
+    }
+  }, [prefs, connected, startTelemetry, stopTelemetry]);
+
   const [apiKey, setApiKey] = useState('');
   const [premium, setPremium] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
@@ -69,7 +81,7 @@ export function Settings() {
       if (settings.tts?.enabled != null) setTtsEnabled(settings.tts.enabled);
       if (settings.tts?.voice) setTtsVoice(settings.tts.voice);
       if (settings.tts?.rate != null) setTtsRate(settings.tts.rate);
-      if (settings.telemetryPort) setPort(settings.telemetryPort);
+      // telemetry port is managed by PrefsContext (telemetryPorts[0])
     }).catch(() => {});
     api.getUsage?.().then(setUsage).catch(() => {});
     getCacheStats().then(setCacheStats).catch(() => {});
@@ -145,12 +157,11 @@ export function Settings() {
     await api.saveSettings?.({
       ...prev,
       tts: { enabled: ttsEnabled, voice: ttsVoice, rate: ttsRate },
-      telemetryPort: port,
       ptt: { ...(prev.ptt ?? {}), binding: ptt.binding },
     });
     setSaveStatus('Saved!');
     setTimeout(() => setSaveStatus(null), 2000);
-  }, [ttsEnabled, ttsVoice, ttsRate, port, ptt.binding]);
+  }, [ttsEnabled, ttsVoice, ttsRate, ptt.binding]);
 
   const refreshUsage = useCallback(() => {
     api.getUsage?.().then(setUsage).catch(() => {});
@@ -249,6 +260,7 @@ export function Settings() {
             </div>
             <p className="settings-note">
               Set the game's UDP Port to the same value. Default: 20777.
+              Changes save automatically and re-bind the listener.
             </p>
           </div>
 
@@ -842,7 +854,8 @@ export function Settings() {
           {saveStatus || 'Save All Settings'}
         </button>
         <p className="settings-note">
-          Saves API key, Premium flag, TTS, PTT binding, and telemetry port to disk.
+          Saves API key, Premium flag, TTS, and PTT binding to disk. Ports and
+          driver prefs save automatically as you change them.
         </p>
       </div>
     </div>

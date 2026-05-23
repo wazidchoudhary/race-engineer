@@ -1,6 +1,6 @@
 [package]
 name = "apex-engineer"
-version = "0.1.5"
+version = "0.1.6"
 description = "Apex Engineer — F1 25 Race Telemetry"
 authors = ["mohd wazid ali"]
 edition = "2021"
