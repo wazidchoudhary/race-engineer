@@ -26,7 +26,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
 ];
 
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
-  const { connected, session, startTelemetry, stopTelemetry, rivalCarIndex, slot } = useTelemetryContext();
+  const { connected, session, startTelemetry, stopTelemetry, rivalCarIndex, slot, packetRx } = useTelemetryContext();
   const { telemetryPorts } = usePrefs();
   const primaryPort = telemetryPorts[0] ?? 20777;
 
@@ -45,6 +45,18 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       <div className="connection-status">
         <div className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
         <span>{connected ? 'LIVE' : 'OFFLINE'}</span>
+        {connected && (
+          <span
+            style={{ marginLeft: 8, fontSize: '0.75em', opacity: 0.75 }}
+            title={
+              packetRx.count === 0
+                ? 'Listening but no UDP packets received yet. If this stays at 0 after a few seconds, check Windows Firewall for apex-engineer.exe or the F1 25 UDP IP setting.'
+                : `Received ${packetRx.count} UDP packets. Last packet id: ${packetRx.lastPacketId}`
+            }
+          >
+            {packetRx.count === 0 ? 'no UDP' : `RX ${packetRx.count}`}
+          </span>
+        )}
       </div>
 
       {session && (

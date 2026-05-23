@@ -33,9 +33,16 @@ import {
   onDriverHistoryUpdateFor,
   onMotionUpdateFor,
   onTrackTraceCompleteFor,
+  onPacketRxFor,
   api,
   type MotionUpdate,
 } from '../lib/tauri-api';
+
+export interface PacketRxStats {
+  count: number;
+  lastPacketId: number;
+  lastSeenAt: number;
+}
 
 function createInitialState(): TelemetryState {
   return {
@@ -64,6 +71,9 @@ function createInitialState(): TelemetryState {
 
 export function useTelemetry(slot: string = PRIMARY_SLOT) {
   const [state, setState] = useState<TelemetryState>(createInitialState);
+  const [packetRx, setPacketRx] = useState<PacketRxStats>(
+    { count: 0, lastPacketId: 0, lastSeenAt: 0 }
+  );
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -136,6 +146,17 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
           api.saveTrackTrace(data.trackId, data.samples)
             .catch((e) => console.error('saveTrackTrace:', e));
         }),
+
+        // Diagnostic: Rust emits this every 30 UDP packets. If the count
+        // never moves while telemetry is "LIVE", packets aren't actually
+        // arriving — almost always a Windows Firewall block on this exe
+        // or F1 25 sending to a destination this app isn't listening on.
+        onPacketRxFor(slot, (data) =>
+          setPacketRx({
+            count: data.count,
+            lastPacketId: data.lastPacketId,
+            lastSeenAt: Date.now(),
+          })),
       ]);
 
       const fns: Array<() => void> = [];
@@ -171,5 +192,5 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
     setState((s) => ({ ...s, driverHistories: {}, rivalCarIndex: null }));
   }, [state.session?.trackId, state.session?.sessionType]);
 
-  return { ...state, startTelemetry, stopTelemetry, setRival };
+  return { ...state, startTelemetry, stopTelemetry, setRival, packetRx };
 }

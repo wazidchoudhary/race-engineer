@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, type ReactNode } from 'react';
-import { useTelemetry } from '../hooks/useTelemetry';
+import React, { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTelemetry, type PacketRxStats } from '../hooks/useTelemetry';
 import { useIntelligence, type IntelligenceData } from '../hooks/useIntelligence';
+import { usePrefs } from './PrefsContext';
 import type { TelemetryState } from '../../shared/types/store';
 import { PRIMARY_SLOT } from '../lib/tauri-api';
 
@@ -14,6 +15,8 @@ export interface TelemetryContextValue extends TelemetryState {
   /** Spawned windows lock to the URL's `?slot=X`; the main window can switch. */
   locked: boolean;
   setSlot: (slot: string) => void;
+  /** Diagnostic UDP receive stats (count, last packet id, last seen at). */
+  packetRx: PacketRxStats;
 }
 
 const TelemetryContext = createContext<TelemetryContextValue | null>(null);
@@ -36,6 +39,21 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
 
   const telemetry = useTelemetry(slot);
   const intelligence = useIntelligence(telemetry);
+  const { telemetryPorts } = usePrefs();
+
+  // Auto-start the primary UDP listener once on app launch in the main window.
+  // Without this, the Dashboard stays empty until the user finds and clicks the
+  // "Start Telemetry" button in the sidebar — surprising for anyone coming
+  // from Team Telemetry, which auto-listens.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (locked) return;
+    if (slot !== PRIMARY_SLOT) return;
+    autoStartedRef.current = true;
+    const port = telemetryPorts[0] ?? 20777;
+    telemetry.startTelemetry(port);
+  }, [locked, slot, telemetryPorts, telemetry]);
 
   const value: TelemetryContextValue = {
     ...telemetry,

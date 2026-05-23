@@ -82,6 +82,11 @@ pub async fn start_udp_listener(
 
     tokio::spawn(async move {
         let mut buf = vec![0u8; 4096];
+        // Diagnostic counter — emit a `packet-rx` event every 30 packets so
+        // the UI can show "we are actually receiving UDP" vs "the socket is
+        // silent." Zero rx for >2s after start_telemetry == firewall block
+        // or wrong destination IP from the game, not a parser/UI bug.
+        let mut packet_count: u64 = 0;
         loop {
             tokio::select! {
                 _ = &mut rx => break,
@@ -108,14 +113,24 @@ pub async fn start_udp_listener(
                     }
 
                     if let Some(header) = parser::parse_header(packet) {
+                        if packet_count == 0 {
+                            log::info!("First UDP packet received on slot {} (len={}, packet_id={})",
+                                slot_clone, n, header.packet_id);
+                        }
+                        packet_count += 1;
+                        if packet_count % 30 == 0 {
+                            emit_for(&app_clone, &slot_clone, "packet-rx",
+                                json!({ "count": packet_count, "lastPacketId": header.packet_id }));
+                        }
                         handle_packet(&slot_clone, header, packet, &state_clone, &app_clone);
                     }
                 }
             }
         }
-        log::info!("Telemetry slot={} stopped on :{}", slot_clone, port);
+        log::info!("Telemetry slot={} stopped on :{} (received {} packets)",
+            slot_clone, port, packet_count);
         emit_for(&app_clone, &slot_clone, "telemetry-stopped",
-            json!({ "slot": &slot_clone }));
+            json!({ "slot": &slot_clone, "packetCount": packet_count }));
     });
 
     Ok(TelemetryHandle { shutdown: tx, port })
