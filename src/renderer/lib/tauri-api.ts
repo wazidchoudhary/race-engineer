@@ -109,7 +109,7 @@ export const api = {
       { payload },
     ),
 
-  ttsSpeak: (payload: { text: string; voice?: string }) =>
+  ttsSpeak: (payload: { text: string; voice?: string; rate?: number }) =>
     invoke<string>('tts_speak', { payload }),
 
   // ── Network connectivity (firewall + UPnP) ────────────────────────────
@@ -264,8 +264,8 @@ export const onBestLapsUpdate     = (cb: (d: any) => void) => bind<any>('best-la
 export const onFastestLapUpdate   = (cb: (d: any) => void) => bind<any>('fastest-lap-update', PRIMARY_SLOT, cb);
 export const onEventUpdate        = (cb: (d: any) => void) => bind<any>('event-update', PRIMARY_SLOT, cb);
 export const onDriverHistoryUpdate= (cb: (d: any) => void) => bind<any>('driver-history-update', PRIMARY_SLOT, cb);
-export const onPacketRx           = (cb: (d: { count: number; lastPacketId: number }) => void) =>
-  bind<{ count: number; lastPacketId: number }>('packet-rx', PRIMARY_SLOT, cb);
+export const onPacketRx           = (cb: (d: { count: number; lastPacketId: number; packetFormat?: number }) => void) =>
+  bind<{ count: number; lastPacketId: number; packetFormat?: number }>('packet-rx', PRIMARY_SLOT, cb);
 
 // Slot-scoped variants — same callbacks, different event suffix.
 export const onTelemetryStartedFor   = (slot: string, cb: (d: any) => void) => bind<any>('telemetry-started', slot, cb);
@@ -285,8 +285,12 @@ export const onBestLapsUpdateFor     = (slot: string, cb: (d: any) => void) => b
 export const onFastestLapUpdateFor   = (slot: string, cb: (d: any) => void) => bind<any>('fastest-lap-update', slot, cb);
 export const onEventUpdateFor        = (slot: string, cb: (d: any) => void) => bind<any>('event-update', slot, cb);
 export const onDriverHistoryUpdateFor= (slot: string, cb: (d: any) => void) => bind<any>('driver-history-update', slot, cb);
-export const onPacketRxFor           = (slot: string, cb: (d: { count: number; lastPacketId: number }) => void) =>
-  bind<{ count: number; lastPacketId: number }>('packet-rx', slot, cb);
+export const onPacketRxFor           = (slot: string, cb: (d: { count: number; lastPacketId: number; packetFormat?: number }) => void) =>
+  bind<{ count: number; lastPacketId: number; packetFormat?: number }>('packet-rx', slot, cb);
 export const onMotionUpdateFor        = (slot: string, cb: (d: MotionUpdate) => void) => bind<MotionUpdate>('motion-update', slot, cb);
+// 2026 Season Pack: Car Telemetry 2 (Overtake mode + Active Aero) and all-car damage.
+export const onTelemetry2UpdateFor    = (slot: string, cb: (d: any) => void) => bind<any>('telemetry2-update', slot, cb);
+export const onAllTelemetry2UpdateFor = (slot: string, cb: (d: any) => void) => bind<any>('alltelemetry2-update', slot, cb);
+export const onAllDamageUpdateFor     = (slot: string, cb: (d: any) => void) => bind<any>('alldamage-update', slot, cb);
 export const onTrackTraceCompleteFor  = (slot: string, cb: (d: { trackId: number; samples: [number, number][] }) => void) =>
   bind<{ trackId: number; samples: [number, number][] }>('track-trace-complete', slot, cb);

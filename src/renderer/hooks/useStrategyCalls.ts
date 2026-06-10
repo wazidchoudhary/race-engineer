@@ -102,7 +102,7 @@ export function useStrategyCalls({ src, premium, onDecision }: Opts) {
       if (prevWeather < 3 && weather >= 3) dispatch('rain_onset');
       else if (prevWeather < weather && weather >= 4) dispatch('rain_heavier');
     }
-    const fcst = s.session.weatherForecastSamples?.[0];
+    const fcst = s.session.weatherForecast?.[0];
     const rainPct = fcst?.rainPercentage ?? 0;
     if (rainPct - p.rainPct >= 25) {
       p.rainPct = rainPct;

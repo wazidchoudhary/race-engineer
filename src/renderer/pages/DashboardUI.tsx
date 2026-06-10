@@ -245,12 +245,25 @@ function FuelGauge({ fuelInTank, fuelCapacity, fuelRemainingLaps }: {
   );
 }
 
-function ErsGauge({ status, analysis }: {
+const ERS_MODE_NAMES: Record<number, string> = { 0: 'NONE', 1: 'MEDIUM', 2: 'HOTLAP', 3: 'BOOST' };
+
+function ErsGauge({ status, telemetry2, analysis }: {
   status: NonNullable<ReturnType<typeof useTelemetryContext>['status']>;
+  telemetry2: ReturnType<typeof useTelemetryContext>['telemetry2'];
   analysis: ErsAnalysis | null;
 }) {
   const storePct = (status.ersStoreEnergy / MAX_ERS_STORE) * 100;
-  const deployedPct = (status.ersDeployedThisLap / MAX_ERS_STORE) * 100;
+  // Reference the per-lap budget against the FIA harvest limit when the game
+  // reports one (2026) — dividing by the full 4 MJ store made "Deploy" look
+  // permanently tiny.
+  const lapRefJ = status.ersHarvestLimitPerLap && status.ersHarvestLimitPerLap > 0
+    ? status.ersHarvestLimitPerLap
+    : MAX_ERS_STORE;
+  const deployedPct = (status.ersDeployedThisLap / lapRefJ) * 100;
+  const harvestedJ = (status.ersHarvestedMGUK ?? 0) + (status.ersHarvestedMGUH ?? 0);
+  const harvestedPct = (harvestedJ / lapRefJ) * 100;
+  const modeName = ERS_MODE_NAMES[status.ersDeployMode] ?? '?';
+  const totalHp = Math.round((status.enginePowerICE + status.enginePowerMGUK) / 745.7);
 
   const recColor: Record<string, string> = {
     [ErsRecommendation.Push]: '#39b54a',
@@ -262,7 +275,16 @@ function ErsGauge({ status, analysis }: {
 
   return (
     <div className="gauge-panel ers-gauge">
-      <h3>ERS</h3>
+      <h3>
+        ERS <span className="ers-mode-badge">{modeName}</span>
+        {telemetry2?.overtakeActive === 1 && <span className="ers-ot-badge active">OVERTAKE</span>}
+        {telemetry2?.overtakeActive !== 1 && telemetry2?.overtakeAvailable === 1 && (
+          <span className="ers-ot-badge">OT ARMED</span>
+        )}
+        {telemetry2 && (
+          <span className="ers-aero-badge">{telemetry2.activeAeroMode === 1 ? 'AERO: STRAIGHT' : 'AERO: CORNER'}</span>
+        )}
+      </h3>
       <div className="ers-bars">
         <div className="ers-bar-group">
           <span className="ers-bar-label">Store</span>
@@ -282,12 +304,26 @@ function ErsGauge({ status, analysis }: {
               backgroundColor: '#ffd700',
             }} />
           </div>
-          <span className="ers-bar-value">{deployedPct.toFixed(0)}%</span>
+          <span className="ers-bar-value">{(status.ersDeployedThisLap / 1e6).toFixed(1)}MJ</span>
+        </div>
+        <div className="ers-bar-group">
+          <span className="ers-bar-label">Harvest</span>
+          <div className="gauge-bar-track">
+            <div className="gauge-bar" style={{
+              width: `${clamp(harvestedPct, 0, 100)}%`,
+              backgroundColor: '#39b54a',
+            }} />
+          </div>
+          <span className="ers-bar-value">
+            {(harvestedJ / 1e6).toFixed(1)}
+            {status.ersHarvestLimitPerLap ? `/${(status.ersHarvestLimitPerLap / 1e6).toFixed(1)}` : ''}MJ
+          </span>
         </div>
       </div>
       <div className="ers-power">
         <span>ICE: {(status.enginePowerICE / 1000).toFixed(0)}kW</span>
         <span>MGU-K: {(status.enginePowerMGUK / 1000).toFixed(0)}kW</span>
+        <span>{totalHp} hp</span>
       </div>
       {analysis && (
         <div className="ers-recommendation" style={{ borderColor: recColor[analysis.recommendation] }}>
@@ -452,7 +488,7 @@ function PacePanel({ analysis }: {
 
 export function Dashboard() {
   const ctx = useTelemetryContext();
-  const { telemetry, status, damage, session, lapData, playerCarIndex, intelligence } = ctx;
+  const { telemetry, telemetry2, status, damage, session, lapData, playerCarIndex, intelligence } = ctx;
   const playerLap = lapData[playerCarIndex];
 
   // No data state
@@ -462,7 +498,10 @@ export function Dashboard() {
         <div className="no-data-message">
           <h2>APEX ENGINEER</h2>
           <p>Waiting for telemetry data...</p>
-          <p className="no-data-hint">Start your F1 25 session and click "Start Telemetry"</p>
+          <p className="no-data-hint">
+            Telemetry listens automatically — start an F1 25 / F1 26 session.
+            If nothing arrives, check the game's UDP settings (port 20777) and Windows Firewall.
+          </p>
         </div>
       </div>
     );
@@ -519,7 +558,7 @@ export function Dashboard() {
             fuelCapacity={status.fuelCapacity}
             fuelRemainingLaps={status.fuelRemainingLaps}
           />
-          <ErsGauge status={status} analysis={intelligence.ersAnalysis} />
+          <ErsGauge status={status} telemetry2={telemetry2} analysis={intelligence.ersAnalysis} />
         </div>
       </div>
 

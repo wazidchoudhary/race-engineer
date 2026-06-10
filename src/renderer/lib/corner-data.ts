@@ -148,6 +148,10 @@ export const PIT_LOSS_SECONDS: Record<number, number> = {
   30: 22,  // Miami
   31: 22,  // Las Vegas
   32: 22,  // Losail
+  39: 22,  // Silverstone (Reverse)
+  40: 19,  // Austria (Reverse)
+  41: 19,  // Zandvoort (Reverse)
+  42: 21,  // Madrid (Madring)
 };
 
 export function pitLossForTrack(trackId: number | undefined): number {
@@ -296,6 +300,10 @@ export const TRACK_CORNER_COUNTS: Record<number, number> = {
   30: 19, // Miami
   31: 17, // Las Vegas
   32: 16, // Losail
+  39: 18, // Silverstone (Reverse)
+  40: 10, // Austria (Reverse)
+  41: 14, // Zandvoort (Reverse)
+  42: 22, // Madrid (Madring)
 };
 
 /**

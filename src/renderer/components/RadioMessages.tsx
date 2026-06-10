@@ -214,33 +214,38 @@ export function RadioMessages() {
     events.forEach((evt, i) => {
       const f = formatEvent(evt, participants?.participants, driverNameMasks, playerCarIndex);
       if (!f) return;
-      const d = new Date();
+      // useTelemetry stamps each event with a monotonic seq (stable across
+      // the 100-event ring buffer — array indices are not) and an arrival
+      // timestamp for display.
+      const at = evt.receivedAt ?? 0;
+      const d = new Date(at || Date.now());
       out.push({
         kind: f.kind,
         text: f.text,
-        seq: i,
+        seq: evt.seq ?? at + i / 1000,
         time: `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`,
       });
     });
     return out.slice(-50);
   }, [events, participants, driverNameMasks, playerCarIndex]);
 
-  // Auto-speak the newest message when voice is on
+  // Auto-speak unspoken messages when voice is on. Iterates everything newer
+  // than the last spoken seq so a burst (penalty + retirement batched into
+  // one render) doesn't drop calls.
   useEffect(() => {
     if (!radioVoiceEnabled || formatted.length === 0) return;
     const newest = formatted[formatted.length - 1];
-    if (newest.seq <= lastSpokenSeq.current) return;
     // On first mount, don't dump the entire backlog into TTS
     if (lastSpokenSeq.current < 0) {
       lastSpokenSeq.current = newest.seq;
       return;
     }
-    if (!SPEAKABLE.has(newest.kind)) {
-      lastSpokenSeq.current = newest.seq;
-      return;
+    for (const m of formatted) {
+      if (m.seq <= lastSpokenSeq.current) continue;
+      lastSpokenSeq.current = m.seq;
+      if (!SPEAKABLE.has(m.kind)) continue;
+      speak(m.text, { voice: voiceRef.current, priority: m.kind === 'penalty' ? 6 : 4 });
     }
-    lastSpokenSeq.current = newest.seq;
-    speak(newest.text, { voice: voiceRef.current, priority: newest.kind === 'penalty' ? 6 : 4 });
   }, [formatted, radioVoiceEnabled]);
 
   return (

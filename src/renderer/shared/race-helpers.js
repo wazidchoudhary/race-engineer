@@ -1,5 +1,7 @@
+// F1 24/25/26 session-type enum: 15 = Race, 16 = Race 2, 17 = Race 3.
+// (10-12 are Sprint Shootout sessions — they were Race in F1 23 and older.)
 export function isRaceSession(session) {
-  return !!session && session.sessionType >= 10 && session.sessionType <= 12;
+  return !!session && session.sessionType >= 15 && session.sessionType <= 17;
 }
 
 export function getPlayerLap(state) {

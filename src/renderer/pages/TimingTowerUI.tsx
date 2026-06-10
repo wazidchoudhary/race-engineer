@@ -2,6 +2,7 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { useTelemetryContext } from '../context/TelemetryContext';
 import { usePrefs } from '../context/PrefsContext';
 import { applyNameMasks } from '../lib/name-mask';
+import { teamColor as sharedTeamColor } from '../lib/team-colors';
 import { DriverDetailModal } from '../components/DriverDetailModal';
 import type { LapData } from '../../shared/types/packets';
 
@@ -15,23 +16,7 @@ const COMPOUND_BADGE: Record<number, { label: string; color: string }> = {
   8:  { label: 'W', color: '#4477FF' },
 };
 
-// F1 25 (2025 season) official team colors.
-const TEAM_COLORS: Record<number, string> = {
-  0: '#27F4D2',  // Mercedes
-  1: '#E80020',  // Ferrari
-  2: '#3671C6',  // Red Bull Racing
-  3: '#64C4FF',  // Williams
-  4: '#229971',  // Aston Martin
-  5: '#0093CC',  // Alpine
-  6: '#6692FF',  // RB / Racing Bulls (VCARB)
-  7: '#B6BABD',  // Haas
-  8: '#FF8000',  // McLaren
-  9: '#52E252',  // Stake F1 Kick Sauber
-  85:  '#6692FF', 86: '#FF98A8', 88: '#FF5733', 89: '#C70D3A',
-  104: '#FF8000', 143: '#52E252',
-};
-
-function teamColor(teamId: number): string { return TEAM_COLORS[teamId] || '#888888'; }
+function teamColor(teamId: number): string { return sharedTeamColor(teamId, '#888888'); }
 
 function formatTime(ms: number): string {
   if (!ms || ms <= 0) return '--:--.---';

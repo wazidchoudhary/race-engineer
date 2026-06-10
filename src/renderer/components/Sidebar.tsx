@@ -21,6 +21,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
   { id: 'rival',       label: 'Rival',         icon: '★' },
   { id: 'session',     label: 'Session',       icon: '⚑' },
   { id: 'engineer',    label: 'Engineer',      icon: '⚙' },
+  { id: 'battery',     label: 'Battery Coach', icon: '⚡' },
   { id: 'radio',       label: 'Radio Config',  icon: '♫' },
   { id: 'settings',    label: 'Settings',      icon: '≣' },
 ];
@@ -55,6 +56,14 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
             }
           >
             {packetRx.count === 0 ? 'no UDP' : `RX ${packetRx.count}`}
+          </span>
+        )}
+        {connected && packetRx.packetFormat >= 2020 && (
+          <span
+            style={{ marginLeft: 6, fontSize: '0.7em', color: '#00d2be', fontWeight: 700 }}
+            title={`Game UDP format ${packetRx.packetFormat}`}
+          >
+            F1 {packetRx.packetFormat - 2000}
           </span>
         )}
       </div>

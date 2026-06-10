@@ -12,27 +12,10 @@ import {
   nearestPitSampleByDistance, type TtTrack,
 } from '../lib/tt-tracks';
 import CIRCUITS from '../../circuits.js';
+import { teamColor } from '../lib/team-colors';
 
 const MAX_ERS = 4_000_000;
 
-// F1 25 (2025 season) official team colors by teamId from the UDP spec.
-const TEAM_COLORS: Record<number, string> = {
-  0: '#27F4D2',  // Mercedes
-  1: '#E80020',  // Ferrari
-  2: '#3671C6',  // Red Bull Racing
-  3: '#64C4FF',  // Williams
-  4: '#229971',  // Aston Martin
-  5: '#0093CC',  // Alpine
-  6: '#6692FF',  // RB / Racing Bulls (VCARB)
-  7: '#B6BABD',  // Haas
-  8: '#FF8000',  // McLaren
-  9: '#52E252',  // Stake F1 Kick Sauber
-  // Historic / career-mode / My Team placeholders kept from the old map
-  85:  '#6692FF', 86: '#FF98A8', 88: '#FF5733', 89: '#C70D3A',
-  104: '#FF8000', 143: '#52E252',
-};
-
-function teamColor(id: number): string { return TEAM_COLORS[id] || '#888'; }
 function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
 
 

@@ -38,6 +38,9 @@ pub struct TelemetryState {
     pub recording_last_lap_distance: f32,
     pub recording_started_at_lap: bool,
     pub current_track_id: Option<i8>,
+    /// Last packetFormat seen on the wire (2025, 2026, ...). Lets the UI show
+    /// which game is feeding us.
+    pub packet_format: u16,
 }
 
 pub type SharedState = Arc<Mutex<TelemetryState>>;
@@ -120,7 +123,11 @@ pub async fn start_udp_listener(
                         packet_count += 1;
                         if packet_count % 30 == 0 {
                             emit_for(&app_clone, &slot_clone, "packet-rx",
-                                json!({ "count": packet_count, "lastPacketId": header.packet_id }));
+                                json!({
+                                    "count": packet_count,
+                                    "lastPacketId": header.packet_id,
+                                    "packetFormat": header.packet_format,
+                                }));
                         }
                         handle_packet(&slot_clone, header, packet, &state_clone, &app_clone);
                     }
@@ -137,13 +144,15 @@ pub async fn start_udp_listener(
 }
 
 fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &SharedState, app: &AppHandle) {
+    let spec = parser::spec_for(header.packet_format);
     let mut s = match state.lock() { Ok(s) => s, Err(_) => return };
+    s.packet_format = header.packet_format;
     let idx = header.player_car_index as usize;
-    if idx < parser::MAX_CARS { s.player_car_index = idx; }
+    if idx < spec.cars { s.player_car_index = idx; }
 
     match header.packet_id {
         0 => {
-            if let Some(motion) = parser::parse_motion(data) {
+            if let Some(motion) = parser::parse_motion(data, &spec) {
                 let player_idx = s.player_car_index;
                 // If a lap-trace recording is in progress for this track,
                 // append the player's (x, z) sample. Start recording once
@@ -165,7 +174,7 @@ fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &Shared
             }
         }
         1 => {
-            if let Some(mut session) = parser::parse_session(data) {
+            if let Some(mut session) = parser::parse_session(data, &spec) {
                 if let Some(override_id) = s.manual_track_id {
                     session["trackId"] = json!(override_id);
                 }
@@ -182,13 +191,17 @@ fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &Shared
                     }
                 }
                 s.session_data = Some(session.clone());
-                let payload = enrich_session(&session);
+                let player_idx = s.player_car_index;
+                let mut payload = enrich_session(&session);
+                if let Value::Object(ref mut m) = payload {
+                    m.insert("playerCarIndex".into(), json!(player_idx));
+                }
                 drop(s);
                 emit_for(app, slot, "session-update", payload);
             }
         }
         2 => {
-            if let Some(lap) = parser::parse_lap_data(data) {
+            if let Some(lap) = parser::parse_lap_data(data, &spec) {
                 let player_idx = s.player_car_index;
 
                 // Lap-trace recorder lifecycle: watch the player's
@@ -236,14 +249,14 @@ fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &Shared
             }
         }
         4 => {
-            if let Some(participants) = parser::parse_participants(data) {
+            if let Some(participants) = parser::parse_participants(data, &spec) {
                 s.participants = Some(participants.clone());
                 drop(s);
                 emit_for(app, slot, "participants-update", participants);
             }
         }
         5 => {
-            if let Some(setup_packet) = parser::parse_car_setup(data) {
+            if let Some(setup_packet) = parser::parse_car_setup(data, &spec) {
                 let player_idx = s.player_car_index;
                 if let (Some(setups), next_fw) = (
                     setup_packet["carSetups"].as_array(),
@@ -264,7 +277,7 @@ fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &Shared
             }
         }
         6 => {
-            if let Some(tel) = parser::parse_car_telemetry(data) {
+            if let Some(tel) = parser::parse_car_telemetry(data, &spec) {
                 let player_idx = s.player_car_index;
                 let player_tel = tel.as_array()
                     .and_then(|a| a.get(player_idx))
@@ -277,7 +290,7 @@ fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &Shared
             }
         }
         7 => {
-            if let Some(status) = parser::parse_car_status(data) {
+            if let Some(status) = parser::parse_car_status(data, &spec) {
                 let player_idx = s.player_car_index;
                 let player_status = status.as_array()
                     .and_then(|a| a.get(player_idx))
@@ -305,15 +318,31 @@ fn handle_packet(slot: &str, header: parser::Header, data: &[u8], state: &Shared
             }
         }
         10 => {
-            if let Some(damage) = parser::parse_car_damage(data) {
+            if let Some(damage) = parser::parse_car_damage(data, &spec) {
                 let player_idx = s.player_car_index;
                 let player_dmg = damage.as_array()
                     .and_then(|a| a.get(player_idx))
                     .cloned()
                     .unwrap_or(Value::Null);
-                s.car_damage = Some(damage);
+                s.car_damage = Some(damage.clone());
                 drop(s);
                 emit_for(app, slot, "damage-update", player_dmg);
+                emit_for(app, slot, "alldamage-update", damage);
+            }
+        }
+        16 => {
+            // Car Telemetry 2 (2026 Season Pack): Overtake mode + Active Aero.
+            if spec.is_2026 {
+                if let Some(tel2) = parser::parse_car_telemetry2(data, &spec) {
+                    let player_idx = s.player_car_index;
+                    let player_tel2 = tel2.as_array()
+                        .and_then(|a| a.get(player_idx))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    drop(s);
+                    emit_for(app, slot, "telemetry2-update", player_tel2);
+                    emit_for(app, slot, "alltelemetry2-update", tel2);
+                }
             }
         }
         11 => {
@@ -370,15 +399,20 @@ fn track_name(id: i8) -> &'static str {
         24 => "Suzuka Short",  25 => "Hanoi",        26 => "Zandvoort",
         27 => "Imola",         28 => "Portimao",     29 => "Jeddah",
         30 => "Miami",         31 => "Las Vegas",    32 => "Losail",
+        39 => "Silverstone (Reverse)", 40 => "Austria (Reverse)",
+        41 => "Zandvoort (Reverse)",   42 => "Madrid",
         _  => "Unknown Track",
     }
 }
 
+// F1 24/25/26 session-type enum (Race moved 10 -> 15 in F1 24).
 fn session_type_name(t: u8) -> &'static str {
     match t {
         0 => "Unknown", 1 => "P1", 2 => "P2", 3 => "P3", 4 => "Short Practice",
         5 => "Q1", 6 => "Q2", 7 => "Q3", 8 => "Short Q", 9 => "OSQ",
-        10 => "Race", 11 => "Race 2", 12 => "Race 3", 13 => "Time Trial",
+        10 => "SQ1", 11 => "SQ2", 12 => "SQ3", 13 => "Short Sprint Q",
+        14 => "OSQ Sprint", 15 => "Race", 16 => "Race 2", 17 => "Race 3",
+        18 => "Time Trial",
         _ => "Unknown",
     }
 }

@@ -2,6 +2,7 @@ import type {
   SessionData,
   LapData,
   CarTelemetry,
+  CarTelemetry2,
   CarStatus,
   CarDamage,
   CarSetup,
@@ -18,10 +19,13 @@ export interface TelemetryState {
   participants: { numActiveCars: number; participants: (Participant | null)[] } | null;
   lapData: LapData[];
   telemetry: CarTelemetry | null;
+  /** 2026 Season Pack only — Overtake mode + Active Aero state (player). */
+  telemetry2: CarTelemetry2 | null;
   status: CarStatus | null;
   damage: CarDamage | null;
   setup: CarSetup | null;
   allCarTelemetry: CarTelemetry[];
+  allCarTelemetry2: CarTelemetry2[];
   allCarStatus: CarStatus[];
   allCarSetup: CarSetup[];
   allCarDamage: CarDamage[];

@@ -1,21 +1,12 @@
-// F1 25 UDP Packet Type Definitions
-// Byte offsets verified against EA F1 25 official spec
+// F1 25 / F1 26 (2026 Season Pack) UDP Packet Type Definitions
+// Byte offsets verified against EA's official specs (packetFormat 2025 / 2026).
 
 export const PACKET_HEADER_SIZE = 29;
-export const MAX_CARS = 22;
+/// 24 in packetFormat 2026 (Audi + Cadillac), 22 in 2025.
+export const MAX_CARS = 24;
 
-// Per-car data sizes (F1 25)
-export const LAP_DATA_SIZE = 57;
-export const CAR_TELEMETRY_SIZE = 60;
-export const CAR_STATUS_SIZE = 55;
-export const CAR_DAMAGE_SIZE = 46;
-export const CAR_SETUP_SIZE = 50;
-export const PARTICIPANT_SIZE = 57;
-export const LAP_HISTORY_SIZE = 14;
-export const WEATHER_FORECAST_SAMPLE_SIZE = 8;
-export const MAX_WEATHER_SAMPLES = 64;
-export const MARSHAL_ZONE_SIZE = 5;
-export const MAX_MARSHAL_ZONES = 21;
+/** ERS energy-store capacity in joules (4 MJ — unchanged for 2026 regs). */
+export const MAX_ERS_STORE_J = 4_000_000;
 
 // Packet IDs
 export enum PacketId {
@@ -34,6 +25,9 @@ export enum PacketId {
   TyreSets = 12,
   MotionEx = 13,
   TimeTrial = 14,
+  LapPositions = 15,
+  /** New in 2026 Season Pack: Overtake mode + Active Aero per car. */
+  CarTelemetry2 = 16,
 }
 
 // Tyre order in F1 25: RL=0, RR=1, FL=2, FR=3
@@ -53,6 +47,7 @@ export enum Weather {
   Storm = 5,
 }
 
+// F1 24/25/26 enum — Race moved from 10 to 15 in F1 24.
 export enum SessionType {
   Unknown = 0,
   P1 = 1,
@@ -64,10 +59,25 @@ export enum SessionType {
   Q3 = 7,
   ShortQ = 8,
   OSQ = 9,
-  Race = 10,
-  Race2 = 11,
-  Race3 = 12,
-  TimeTrial = 13,
+  SprintShootout1 = 10,
+  SprintShootout2 = 11,
+  SprintShootout3 = 12,
+  ShortSprintShootout = 13,
+  OneShotSprintShootout = 14,
+  Race = 15,
+  Race2 = 16,
+  Race3 = 17,
+  TimeTrial = 18,
+}
+
+/** True for R / R2 / R3 (F1 24+ enum values 15-17). */
+export function isRaceSessionType(t: number | undefined | null): boolean {
+  return t != null && t >= SessionType.Race && t <= SessionType.Race3;
+}
+
+/** True for any qualifying-style session (Q1-OSQ, sprint shootouts). */
+export function isQualiSessionType(t: number | undefined | null): boolean {
+  return t != null && t >= SessionType.Q1 && t <= SessionType.OneShotSprintShootout;
 }
 
 export enum SafetyCarStatus {
@@ -109,12 +119,20 @@ export enum FiaFlag {
   Yellow = 3,
 }
 
+// Mode 3 is "Overtake" in F1 25, renamed "Boost" in the 2026 Season Pack.
 export enum ErsDeployMode {
   None = 0,
   Medium = 1,
   Hotlap = 2,
-  Overtake = 3,
+  Boost = 3,
 }
+
+export const ERS_MODE_LABELS: Record<number, string> = {
+  0: 'None',
+  1: 'Medium',
+  2: 'Hotlap',
+  3: 'Boost',
+};
 
 export enum ActualTyreCompound {
   C5 = 16,
@@ -167,7 +185,15 @@ export interface MarshalZone {
   zoneFlag: FiaFlag;
 }
 
+/** Lap-fraction zone (0..1 around the lap) — DRS and Active Aero zones. */
+export interface LapZone {
+  start: number;
+  end: number;
+}
+
 export interface SessionData {
+  /** 2025 or 2026 — which UDP format the game is sending. */
+  packetFormat?: number;
   weather: Weather;
   trackTemperature: number;
   airTemperature: number;
@@ -192,6 +218,12 @@ export interface SessionData {
   trackName: string;
   sessionTypeName: string;
   weatherName: string;
+  // ── 2026 Season Pack additions ──
+  /** 0 = Full active-aero, 1 = Partial (per track). */
+  activeAeroTrackStatus?: number;
+  aeroZonesFull?: LapZone[];
+  aeroZonesPartial?: LapZone[];
+  drsZones?: LapZone[];
 }
 
 // 4-element arrays: [RL, RR, FL, FR]
@@ -280,8 +312,26 @@ export interface CarStatus {
   ersDeployMode: ErsDeployMode;
   ersHarvestedMGUK: number;
   ersHarvestedMGUH: number;
+  /** 2026 only: FIA per-lap harvest limit in joules (varies by track). */
+  ersHarvestLimitPerLap?: number;
   ersDeployedThisLap: number;
   networkPaused: number;
+}
+
+/** 2026 Season Pack — Car Telemetry 2 (packet id 16). */
+export interface CarTelemetry2 {
+  /** 0 = Corner mode (Z-mode), 1 = Straight mode (X-mode). */
+  activeAeroMode: number;
+  activeAeroAvailable: number;
+  /** Metres until Active Aero is available; 0 = not available. */
+  activeAeroActivationDist: number;
+  /** Manual Override (push-to-pass) armed for this lap. */
+  overtakeAvailable: number;
+  overtakeActive: number;
+  overtakeActivationDist: number;
+  /** 1 when this car runs 2026 regulations. */
+  regulations2026: number;
+  drivingWrongWay: number;
 }
 
 export interface CarDamage {
@@ -354,6 +404,10 @@ export interface EventData {
   eventType?: number;
   overtakingVehicleIdx?: number;
   beingOvertakenVehicleIdx?: number;
+  /** Stamped client-side when the event arrives. */
+  receivedAt?: number;
+  /** Monotonic client-side sequence number (stable across the ring buffer). */
+  seq?: number;
 }
 
 export interface SessionHistory {

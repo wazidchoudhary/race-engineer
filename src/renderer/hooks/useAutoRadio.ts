@@ -75,8 +75,9 @@ function fmtLap(ms: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`;
 }
 
+// F1 24/25/26 enum: Race = 15..17 (10..12 are Sprint Shootouts).
 function isRaceSession(s: any): boolean {
-  return !!s && s.sessionType >= 10 && s.sessionType <= 12;
+  return !!s && s.sessionType >= 15 && s.sessionType <= 17;
 }
 
 interface DetectionMemory {
@@ -145,6 +146,9 @@ export function useAutoRadio(
   ctx: TelemetryContextValue,
   ttsEnabled: boolean,
   ttsVoice: string,
+  /** Popout windows set this — keep the local feed but never spend on
+   *  Claude calls (the main window already makes them). */
+  suppressAi = false,
 ): { messages: RadioMessage[]; clearMessages: () => void } {
   const prefs = usePrefs();
   const [messages, setMessages] = useState<RadioMessage[]>([]);
@@ -156,6 +160,8 @@ export function useAutoRadio(
   prefsRef.current = prefs;
   const ttsRef = useRef({ enabled: ttsEnabled, voice: ttsVoice });
   ttsRef.current = { enabled: ttsEnabled, voice: ttsVoice };
+  const suppressAiRef = useRef(suppressAi);
+  suppressAiRef.current = suppressAi;
 
   const memRef = useRef<DetectionMemory>(freshMemory());
   const triggerLogRef = useRef<Record<string, number>>({});
@@ -213,7 +219,9 @@ export function useAutoRadio(
     };
 
     // AI path — only if category is AI-enabled and we have premium + key.
-    if (isCategoryAi(p.radioConfig, category)) {
+    // Suppressed in popout windows so each open window doesn't fire its own
+    // paid Claude call for the same situation.
+    if (!suppressAiRef.current && isCategoryAi(p.radioConfig, category)) {
       const snapshot = buildContextSnapshot(ctxRef.current, category, situation, aiContextHint);
       // Fire-and-forget; fall back to classic text if AI rejects.
       api.askEngineer({
@@ -547,7 +555,7 @@ function runDetectors(ctx: TelemetryContextValue, mem: DetectionMemory, emit: Em
     else emit('weather', 'temperature_change', 'Weather shifting.');
   }
   mem.weather = w;
-  const fcst = (ses as any).weatherForecastSamples?.[0];
+  const fcst = (ses as any).weatherForecast?.[0];
   const rainPct = fcst?.rainPercentage ?? 0;
   if (rainPct - mem.rainPctForecast >= 25) {
     emit('weather', 'rain_incoming', `Rain incoming, forecast ${rainPct} percent within five minutes.`);

@@ -1,16 +1,55 @@
-/// F1 25 UDP packet parser — ported from src/main/telemetry-parser.js
+/// F1 25 / F1 26 (2026 Season Pack) UDP packet parser.
+///
+/// The packet header layout is identical across 2025/2026 (29 bytes), but the
+/// 2026 format grows the grid to 24 cars and changes several per-car strides:
+///   - CarMotionData    60 -> 54  (g-forces quantised to int16)
+///   - CarTelemetryData 60 -> 59  (engineTemperature u16 -> u8)
+///   - CarStatusData    55 -> 59  (+ ersHarvestLimitPerLap f32)
+///   - ParticipantData  57 -> 60  (driverId/networkId/teamId u8 -> u16)
+/// plus a new Car Telemetry 2 packet (id 16) and DRS / Active-Aero zone
+/// tables appended to the Session packet. Offsets verified against EA's
+/// official "Data Output from F1 25: 2026 Season Pack" spec v1.1.
 use serde_json::{json, Value};
 
 pub const HEADER_SIZE: usize = 29;
-pub const MAX_CARS: usize = 22;
 const LAP_SIZE: usize = 57;
-const TELEMETRY_SIZE: usize = 60;
-const STATUS_SIZE: usize = 55;
 const DAMAGE_SIZE: usize = 46;
 const SETUP_SIZE: usize = 50;
-const PARTICIPANT_SIZE: usize = 57;
 const LAP_HISTORY_SIZE: usize = 14;
-const MOTION_SIZE: usize = 60;
+
+/// Per-format packet geometry.
+#[derive(Clone, Copy)]
+pub struct Spec {
+    pub cars: usize,
+    pub motion_stride: usize,
+    pub telemetry_stride: usize,
+    pub status_stride: usize,
+    pub participant_stride: usize,
+    pub is_2026: bool,
+}
+
+pub fn spec_for(format: u16) -> Spec {
+    if format >= 2026 {
+        Spec {
+            cars: 24,
+            motion_stride: 54,
+            telemetry_stride: 59,
+            status_stride: 59,
+            participant_stride: 60,
+            is_2026: true,
+        }
+    } else {
+        // 2025 and older formats we may receive are parsed with F1 25 offsets.
+        Spec {
+            cars: 22,
+            motion_stride: 60,
+            telemetry_stride: 60,
+            status_stride: 55,
+            participant_stride: 57,
+            is_2026: false,
+        }
+    }
+}
 
 // ── Read helpers ───────────────────────────────────────────────────────────────
 #[inline] fn ru8(d: &[u8], o: usize) -> u8 { d.get(o).copied().unwrap_or(0) }
@@ -29,6 +68,7 @@ const MOTION_SIZE: usize = 60;
 }
 fn read_str(d: &[u8], start: usize, len: usize) -> String {
     let end = (start + len).min(d.len());
+    if start >= end { return String::new(); }
     let slice = &d[start..end];
     let null_pos = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
     String::from_utf8_lossy(&slice[..null_pos]).into_owned()
@@ -36,6 +76,7 @@ fn read_str(d: &[u8], start: usize, len: usize) -> String {
 
 // ── Header ────────────────────────────────────────────────────────────────────
 pub struct Header {
+    pub packet_format: u16,
     pub packet_id: u8,
     pub player_car_index: u8,
 }
@@ -43,21 +84,20 @@ pub struct Header {
 pub fn parse_header(d: &[u8]) -> Option<Header> {
     if d.len() < HEADER_SIZE { return None; }
     Some(Header {
+        packet_format: ru16(d, 0),
         packet_id: ru8(d, 6),
         player_car_index: ru8(d, 27),
     })
 }
 
 // ── Motion (packet id 0) ──────────────────────────────────────────────────────
-// Each car entry is 60 bytes: worldPos XYZ (12), worldVel XYZ (12), world
-// forward/right dirs as int16 (12), lateral/long/vertical G (12), yaw/pitch/
-// roll as f32 (12). We only need XYZ position for the track map, so we
-// extract just that and drop the rest.
-pub fn parse_motion(d: &[u8]) -> Option<Value> {
+// We only need XYZ world position for the track map; it sits at the start of
+// each car entry in both formats — only the stride differs.
+pub fn parse_motion(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
-    let mut cars = Vec::with_capacity(MAX_CARS);
-    for i in 0..MAX_CARS {
-        let o = h + i * MOTION_SIZE;
+    let mut cars = Vec::with_capacity(spec.cars);
+    for i in 0..spec.cars {
+        let o = h + i * spec.motion_stride;
         if o + 12 > d.len() { break; }
         cars.push(json!({
             "x": rf32(d, o),
@@ -69,7 +109,12 @@ pub fn parse_motion(d: &[u8]) -> Option<Value> {
 }
 
 // ── Session (packet id 1) ─────────────────────────────────────────────────────
-pub fn parse_session(d: &[u8]) -> Option<Value> {
+// The 2025 layout is a strict prefix of the 2026 one; 2026 appends DRS and
+// Active-Aero zone tables (lap-fraction pairs) starting at post-header
+// offset 724.
+const SESSION_2026_ZONES_OFF: usize = 724;
+
+pub fn parse_session(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
     if d.len() < h + 20 { return None; }
 
@@ -97,7 +142,8 @@ pub fn parse_session(d: &[u8]) -> Option<Value> {
         }
     }
 
-    Some(json!({
+    let mut session = json!({
+        "packetFormat":          if spec.is_2026 { 2026 } else { 2025 },
         "weather":               ru8(d, h),
         "trackTemperature":      ri8(d, h + 1),
         "airTemperature":        ri8(d, h + 2),
@@ -118,14 +164,36 @@ pub fn parse_session(d: &[u8]) -> Option<Value> {
         "pitStopWindowLatestLap":pit_latest,
         "weatherForecast":       weather_forecast,
         "forecastAccuracy":      forecast_accuracy,
-    }))
+    });
+
+    if spec.is_2026 {
+        let z = h + SESSION_2026_ZONES_OFF;
+        if d.len() >= z + 173 {
+            let read_zones = |count_off: usize, arr_off: usize, max: usize| -> Vec<Value> {
+                let n = (ru8(d, count_off) as usize).min(max);
+                (0..n).map(|i| {
+                    let o = arr_off + i * 8;
+                    json!({ "start": rf32(d, o), "end": rf32(d, o + 4) })
+                }).collect()
+            };
+            if let Value::Object(ref mut m) = session {
+                m.insert("activeAeroTrackStatus".into(), json!(ru8(d, z)));
+                m.insert("aeroZonesFull".into(),    Value::Array(read_zones(z + 1, z + 2, 8)));
+                m.insert("aeroZonesPartial".into(), Value::Array(read_zones(z + 66, z + 67, 8)));
+                m.insert("drsZones".into(),         Value::Array(read_zones(z + 131, z + 132, 4)));
+            }
+        }
+    }
+
+    Some(session)
 }
 
 // ── Lap Data (packet id 2) ────────────────────────────────────────────────────
-pub fn parse_lap_data(d: &[u8]) -> Option<Value> {
+// Identical 57-byte entries in 2025 and 2026; only the car count differs.
+pub fn parse_lap_data(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
     let mut cars = Vec::new();
-    for i in 0..MAX_CARS {
+    for i in 0..spec.cars {
         let o = h + i * LAP_SIZE;
         if o + LAP_SIZE > d.len() { break; }
         let s1 = ru16(d, o + 8) as u32 + ru8(d, o + 10) as u32 * 60_000;
@@ -161,26 +229,33 @@ pub fn parse_lap_data(d: &[u8]) -> Option<Value> {
 }
 
 // ── Participants (packet id 4) ────────────────────────────────────────────────
-pub fn parse_participants(d: &[u8]) -> Option<Value> {
+// 2026 widened driverId/networkId/teamId to u16, shifting the name to +10.
+pub fn parse_participants(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
     if d.len() < h + 1 { return None; }
     let num = ru8(d, h) as usize;
     let mut list = Vec::new();
-    for i in 0..num.min(MAX_CARS) {
-        let o = h + 1 + i * PARTICIPANT_SIZE;
-        if o + PARTICIPANT_SIZE > d.len() { break; }
+    for i in 0..num.min(spec.cars) {
+        let o = h + 1 + i * spec.participant_stride;
+        if o + spec.participant_stride > d.len() { break; }
+        let (driver_id, network_id, team_id, my_team_off) = if spec.is_2026 {
+            (ru16(d, o + 1) as u32, ru16(d, o + 3) as u32, ru16(d, o + 5) as u32, 7usize)
+        } else {
+            (ru8(d, o + 1) as u32, ru8(d, o + 2) as u32, ru8(d, o + 3) as u32, 4usize)
+        };
+        let name_off = if spec.is_2026 { 10 } else { 7 };
         let name = {
-            let raw = read_str(d, o + 7, 32);
+            let raw = read_str(d, o + name_off, 32);
             if raw.is_empty() { format!("Car {}", i + 1) } else { raw }
         };
         list.push(json!({
             "aiControlled": ru8(d, o),
-            "driverId":     ru8(d, o + 1),
-            "networkId":    ru8(d, o + 2),
-            "teamId":       ru8(d, o + 3),
-            "myTeam":       ru8(d, o + 4),
-            "raceNumber":   ru8(d, o + 5),
-            "nationality":  ru8(d, o + 6),
+            "driverId":     driver_id,
+            "networkId":    network_id,
+            "teamId":       team_id,
+            "myTeam":       ru8(d, o + my_team_off),
+            "raceNumber":   ru8(d, o + my_team_off + 1),
+            "nationality":  ru8(d, o + my_team_off + 2),
             "name":         name,
         }));
     }
@@ -188,12 +263,19 @@ pub fn parse_participants(d: &[u8]) -> Option<Value> {
 }
 
 // ── Car Telemetry (packet id 6) ───────────────────────────────────────────────
-pub fn parse_car_telemetry(d: &[u8]) -> Option<Value> {
+// 2026 shrank engineTemperature to u8, shifting tyrePressure/surfaceType by 1.
+pub fn parse_car_telemetry(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
+    let (temp_is_u8, press_off, surf_off) = if spec.is_2026 {
+        (true, 39usize, 55usize)
+    } else {
+        (false, 40usize, 56usize)
+    };
     let mut cars = Vec::new();
-    for i in 0..MAX_CARS {
-        let o = h + i * TELEMETRY_SIZE;
-        if o + TELEMETRY_SIZE > d.len() { break; }
+    for i in 0..spec.cars {
+        let o = h + i * spec.telemetry_stride;
+        if o + spec.telemetry_stride > d.len() { break; }
+        let engine_temp: u16 = if temp_is_u8 { ru8(d, o + 38) as u16 } else { ru16(d, o + 38) };
         cars.push(json!({
             "speed":           ru16(d, o),
             "throttle":        rf32(d, o + 2),
@@ -207,19 +289,46 @@ pub fn parse_car_telemetry(d: &[u8]) -> Option<Value> {
             "brakesTemp":      [ru16(d,o+22),ru16(d,o+24),ru16(d,o+26),ru16(d,o+28)],
             "tyreSurfaceTemp": [ru8(d,o+30),ru8(d,o+31),ru8(d,o+32),ru8(d,o+33)],
             "tyreInnerTemp":   [ru8(d,o+34),ru8(d,o+35),ru8(d,o+36),ru8(d,o+37)],
-            "engineTemp":      ru16(d, o + 38),
-            "tyrePressure":    [rf32(d,o+40),rf32(d,o+44),rf32(d,o+48),rf32(d,o+52)],
-            "surfaceType":     [ru8(d,o+56),ru8(d,o+57),ru8(d,o+58),ru8(d,o+59)],
+            "engineTemp":      engine_temp,
+            "tyrePressure":    [rf32(d,o+press_off),rf32(d,o+press_off+4),rf32(d,o+press_off+8),rf32(d,o+press_off+12)],
+            "surfaceType":     [ru8(d,o+surf_off),ru8(d,o+surf_off+1),ru8(d,o+surf_off+2),ru8(d,o+surf_off+3)],
+        }));
+    }
+    if cars.is_empty() { None } else { Some(Value::Array(cars)) }
+}
+
+// ── Car Telemetry 2 (packet id 16, 2026 only) ─────────────────────────────────
+// Per-car: activeAeroMode u8, activeAeroAvailable u8, activeAeroActivationDistance u16,
+// overtakeAvailable u8, overtakeActive u8, overtakeActivationDistance u16,
+// regulations2026 u8, drivingWrongWay u8 — 10 bytes.
+const TELEMETRY2_SIZE: usize = 10;
+
+pub fn parse_car_telemetry2(d: &[u8], spec: &Spec) -> Option<Value> {
+    let h = HEADER_SIZE;
+    let mut cars = Vec::new();
+    for i in 0..spec.cars {
+        let o = h + i * TELEMETRY2_SIZE;
+        if o + TELEMETRY2_SIZE > d.len() { break; }
+        cars.push(json!({
+            "activeAeroMode":      ru8(d, o),       // 0 = Corner mode, 1 = Straight mode
+            "activeAeroAvailable": ru8(d, o + 1),
+            "activeAeroActivationDist": ru16(d, o + 2),
+            "overtakeAvailable":   ru8(d, o + 4),   // Manual Override armed
+            "overtakeActive":      ru8(d, o + 5),
+            "overtakeActivationDist": ru16(d, o + 6),
+            "regulations2026":     ru8(d, o + 8),
+            "drivingWrongWay":     ru8(d, o + 9),
         }));
     }
     if cars.is_empty() { None } else { Some(Value::Array(cars)) }
 }
 
 // ── Car Setup (packet id 5) ───────────────────────────────────────────────────
-pub fn parse_car_setup(d: &[u8]) -> Option<Value> {
+// 50-byte entries in both formats.
+pub fn parse_car_setup(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
     let mut cars = Vec::new();
-    for i in 0..MAX_CARS {
+    for i in 0..spec.cars {
         let o = h + i * SETUP_SIZE;
         if o + SETUP_SIZE > d.len() { break; }
         cars.push(json!({
@@ -248,19 +357,21 @@ pub fn parse_car_setup(d: &[u8]) -> Option<Value> {
             "fuelLoad":               rf32(d, o + 46),
         }));
     }
-    let next_fw_off = h + MAX_CARS * SETUP_SIZE;
+    let next_fw_off = h + spec.cars * SETUP_SIZE;
     let next_fw = if d.len() >= next_fw_off + 4 { rf32(d, next_fw_off) } else { 0.0 };
     Some(json!({ "carSetups": cars, "nextFrontWingValue": next_fw }))
 }
 
 // ── Car Status (packet id 7) ──────────────────────────────────────────────────
-pub fn parse_car_status(d: &[u8]) -> Option<Value> {
+// 2026 inserts ersHarvestLimitPerLap (f32) after ersHarvestedThisLapMGUH,
+// shifting ersDeployedThisLap and networkPaused by 4.
+pub fn parse_car_status(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
     let mut cars = Vec::new();
-    for i in 0..MAX_CARS {
-        let o = h + i * STATUS_SIZE;
-        if o + STATUS_SIZE > d.len() { break; }
-        cars.push(json!({
+    for i in 0..spec.cars {
+        let o = h + i * spec.status_stride;
+        if o + spec.status_stride > d.len() { break; }
+        let mut car = json!({
             "tractionControl":    ru8(d, o),
             "antiLockBrakes":     ru8(d, o + 1),
             "fuelMix":            ru8(d, o + 2),
@@ -284,18 +395,28 @@ pub fn parse_car_status(d: &[u8]) -> Option<Value> {
             "ersDeployMode":      ru8(d, o + 41),
             "ersHarvestedMGUK":   rf32(d, o + 42),
             "ersHarvestedMGUH":   rf32(d, o + 46),
-            "ersDeployedThisLap": rf32(d, o + 50),
-            "networkPaused":      ru8(d, o + 54),
-        }));
+        });
+        if let Value::Object(ref mut m) = car {
+            if spec.is_2026 {
+                m.insert("ersHarvestLimitPerLap".into(), json!(rf32(d, o + 50)));
+                m.insert("ersDeployedThisLap".into(),    json!(rf32(d, o + 54)));
+                m.insert("networkPaused".into(),         json!(ru8(d, o + 58)));
+            } else {
+                m.insert("ersDeployedThisLap".into(),    json!(rf32(d, o + 50)));
+                m.insert("networkPaused".into(),         json!(ru8(d, o + 54)));
+            }
+        }
+        cars.push(car);
     }
     if cars.is_empty() { None } else { Some(Value::Array(cars)) }
 }
 
 // ── Car Damage (packet id 10) ─────────────────────────────────────────────────
-pub fn parse_car_damage(d: &[u8]) -> Option<Value> {
+// 46-byte entries in both formats.
+pub fn parse_car_damage(d: &[u8], spec: &Spec) -> Option<Value> {
     let h = HEADER_SIZE;
     let mut cars = Vec::new();
-    for i in 0..MAX_CARS {
+    for i in 0..spec.cars {
         let o = h + i * DAMAGE_SIZE;
         if o + DAMAGE_SIZE > d.len() { break; }
         cars.push(json!({
@@ -377,6 +498,7 @@ pub fn parse_event(d: &[u8]) -> Option<Value> {
 }
 
 // ── Session History (packet id 11) ────────────────────────────────────────────
+// Single-car packet, identical in 2025 and 2026.
 pub struct SessionHistory {
     pub car_idx: usize,
     pub best_lap_time_ms: u32,

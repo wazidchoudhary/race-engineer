@@ -2159,3 +2159,126 @@ kbd {
 .nav-item:hover .nav-popout-btn { opacity: 1; }
 .nav-popout-btn:hover { background: rgba(0,210,190,0.18); color: #fff; border-color: #00d2be; }
 
+
+/* ── Battery Coach ─────────────────────────────────────────────────────── */
+.battery-coach-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.coach-mode-select {
+  background: #1a1a2e;
+  color: #ddd;
+  border: 1px solid #333355;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.coach-empty {
+  padding: 32px;
+  text-align: center;
+  color: #889;
+  border: 1px dashed #333355;
+  border-radius: 10px;
+}
+
+.coach-strip-panel { padding: 12px 16px; }
+.coach-strip-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.coach-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: #99a; }
+.coach-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.coach-legend-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.coach-strip { width: 100%; height: 64px; display: block; margin-top: 6px; }
+
+.coach-now-row { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+.coach-now, .coach-next { padding: 14px 16px; }
+.coach-now-text { font-size: 17px; line-height: 1.45; color: #eef; margin: 6px 0; }
+.coach-now-text.stance-critical { color: #ff6b6b; }
+.coach-now-text.stance-full { color: #00d2be; }
+.coach-stance { font-size: 12px; }
+.coach-next-text { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.coach-next-dist { font-size: 20px; font-weight: 700; color: #ffd700; }
+
+.coach-strategy { padding: 14px 16px; }
+.coach-strategy-text { color: #ccd; line-height: 1.5; margin: 6px 0 10px; }
+.coach-notes { margin: 0 0 10px; padding-left: 18px; color: #aab; line-height: 1.55; font-size: 13px; }
+.coach-notes li { margin-bottom: 4px; }
+.coach-ai-row { display: flex; align-items: center; gap: 10px; }
+.coach-ai-lesson {
+  margin-top: 10px;
+  padding: 12px;
+  border-left: 3px solid #00d2be;
+  background: rgba(0, 210, 190, 0.06);
+  border-radius: 6px;
+  line-height: 1.55;
+  color: #dde;
+}
+
+.coach-calls { padding: 14px 16px; }
+.coach-calls-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.coach-call { display: flex; gap: 10px; font-size: 13px; color: #ccd; }
+
+.coach-learn { padding: 14px 16px; }
+.coach-learn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.coach-learn-card {
+  background: #1c1c30;
+  border: 1px solid #2c2c48;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.coach-learn-card h4 { margin: 0 0 6px; font-size: 13px; color: #00d2be; }
+.coach-learn-card p { margin: 0; font-size: 12.5px; line-height: 1.5; color: #aab; }
+
+@media (max-width: 1100px) {
+  .coach-now-row { grid-template-columns: 1fr; }
+}
+
+/* ── ERS gauge 2026 badges ─────────────────────────────────────────────── */
+.ers-mode-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #2a2a44;
+  color: #ffd700;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.ers-ot-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #173a5e;
+  color: #4aa3ff;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.ers-ot-badge.active {
+  background: #4aa3ff;
+  color: #06101e;
+  animation: pulse 1s infinite alternate;
+}
+.ers-aero-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #2a2a44;
+  color: #9aa;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+@keyframes pulse { from { opacity: 1; } to { opacity: 0.55; } }

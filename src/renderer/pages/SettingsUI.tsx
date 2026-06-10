@@ -4,6 +4,7 @@ import { usePrefs } from '../context/PrefsContext';
 import { usePushToTalk } from '../hooks/usePushToTalk';
 import { useAppUpdater } from '../hooks/useAppUpdater';
 import { clearCache, getStats as getCacheStats } from '../lib/phrase-cache';
+import { speak, setSpeechRate } from '../lib/tts-speaker';
 
 import { api } from '../lib/tauri-api';
 import type { NetworkDiagnosis, NetworkSetupResult } from '../lib/tauri-api';
@@ -30,6 +31,8 @@ const TRACK_NAMES: Record<number, string> = {
   22: 'Silverstone Short', 23: 'Austin Short', 24: 'Suzuka Short',
   25: 'Hanoi', 26: 'Zandvoort', 27: 'Imola', 28: 'Portimao',
   29: 'Jeddah', 30: 'Miami', 31: 'Las Vegas', 32: 'Losail',
+  39: 'Silverstone (Reverse)', 40: 'Austria (Reverse)',
+  41: 'Zandvoort (Reverse)', 42: 'Madrid',
 };
 
 export function Settings() {
@@ -80,7 +83,7 @@ export function Settings() {
       if (typeof settings.premium === 'boolean') setPremium(settings.premium);
       if (settings.tts?.enabled != null) setTtsEnabled(settings.tts.enabled);
       if (settings.tts?.voice) setTtsVoice(settings.tts.voice);
-      if (settings.tts?.rate != null) setTtsRate(settings.tts.rate);
+      if (settings.tts?.rate != null) { setTtsRate(settings.tts.rate); setSpeechRate(settings.tts.rate); }
       // telemetry port is managed by PrefsContext (telemetryPorts[0])
     }).catch(() => {});
     api.getUsage?.().then(setUsage).catch(() => {});
@@ -144,8 +147,15 @@ export function Settings() {
   }, []);
 
   const testVoice = useCallback(() => {
-    api.ttsSpeak({ text: 'Box this lap, box this lap. Tyres are ready.', voice: ttsVoice });
-  }, [ttsVoice]);
+    // Route through the speaker queue so it actually plays (and exercises the
+    // same path the engineer uses, including the speechSynthesis fallback).
+    speak('Box this lap, box this lap. Tyres are ready.', {
+      voice: ttsVoice,
+      rate: ttsRate,
+      priority: 10,
+      interrupt: true,
+    });
+  }, [ttsVoice, ttsRate]);
 
   const handleTrackChange = useCallback((trackId: number) => {
     setManualTrackId(trackId);
@@ -159,6 +169,9 @@ export function Settings() {
       tts: { enabled: ttsEnabled, voice: ttsVoice, rate: ttsRate },
       ptt: { ...(prev.ptt ?? {}), binding: ptt.binding },
     });
+    setSpeechRate(ttsRate);
+    // Let RadioContext (and anything else holding TTS state) pick up the change.
+    window.dispatchEvent(new CustomEvent('tts-settings-changed'));
     setSaveStatus('Saved!');
     setTimeout(() => setSaveStatus(null), 2000);
   }, [ttsEnabled, ttsVoice, ttsRate, ptt.binding]);

@@ -17,12 +17,15 @@ function fmt(ms: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`;
 }
 
+const MAX_ERS = 4_000_000;
+
 export function Overlay() {
-  const { lapData, status, session, playerCarIndex, damage, bestLapTimes } = useTelemetryContext();
+  const { lapData, status, telemetry2, session, playerCarIndex, damage, bestLapTimes } = useTelemetryContext();
   const lap = lapData[playerCarIndex];
   const comp = status?.visualTyreCompound;
   const compInfo = comp != null ? COMPOUND[comp] : null;
   const best = bestLapTimes[playerCarIndex] ?? 0;
+  const ersPct = status ? Math.round((status.ersStoreEnergy / MAX_ERS) * 100) : null;
 
   const avgWear = damage
     ? (damage.tyresWear[0] + damage.tyresWear[1] + damage.tyresWear[2] + damage.tyresWear[3]) / 4
@@ -64,6 +67,16 @@ export function Overlay() {
         <div className="ov-cell">
           <span className="ov-label">WEAR</span>
           <span className="ov-val mono">{avgWear.toFixed(0)}%</span>
+        </div>
+        <div className="ov-cell">
+          <span className="ov-label">BATT</span>
+          <span
+            className="ov-val mono"
+            style={{ color: ersPct != null && ersPct < 15 ? '#ff5555' : telemetry2?.overtakeActive ? '#4aa3ff' : '#00d2be' }}
+          >
+            {ersPct != null ? `${ersPct}%` : '--'}
+            {telemetry2?.overtakeActive === 1 ? ' OT' : ''}
+          </span>
         </div>
       </div>
     </div>

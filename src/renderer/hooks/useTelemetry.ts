@@ -3,6 +3,7 @@ import type {
   SessionData,
   LapData,
   CarTelemetry,
+  CarTelemetry2,
   CarStatus,
   CarDamage,
   CarSetup,
@@ -34,6 +35,9 @@ import {
   onMotionUpdateFor,
   onTrackTraceCompleteFor,
   onPacketRxFor,
+  onTelemetry2UpdateFor,
+  onAllTelemetry2UpdateFor,
+  onAllDamageUpdateFor,
   api,
   type MotionUpdate,
 } from '../lib/tauri-api';
@@ -42,7 +46,13 @@ export interface PacketRxStats {
   count: number;
   lastPacketId: number;
   lastSeenAt: number;
+  /** 2025 / 2026 — last packetFormat seen on the wire. */
+  packetFormat: number;
 }
+
+// Monotonic sequence for incoming game events — survives the 100-entry ring
+// buffer (array indices don't) so feeds can dedupe / speak-once reliably.
+let nextEventSeq = 1;
 
 function createInitialState(): TelemetryState {
   return {
@@ -51,10 +61,12 @@ function createInitialState(): TelemetryState {
     participants: null,
     lapData: [],
     telemetry: null,
+    telemetry2: null,
     status: null,
     damage: null,
     setup: null,
     allCarTelemetry: [],
+    allCarTelemetry2: [],
     allCarStatus: [],
     allCarSetup: [],
     allCarDamage: [],
@@ -72,7 +84,7 @@ function createInitialState(): TelemetryState {
 export function useTelemetry(slot: string = PRIMARY_SLOT) {
   const [state, setState] = useState<TelemetryState>(createInitialState);
   const [packetRx, setPacketRx] = useState<PacketRxStats>(
-    { count: 0, lastPacketId: 0, lastSeenAt: 0 }
+    { count: 0, lastPacketId: 0, lastSeenAt: 0, packetFormat: 0 }
   );
 
   useEffect(() => {
@@ -96,6 +108,15 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
 
         onAllTelemetryUpdateFor(slot, (data: CarTelemetry[]) =>
           setState((s) => ({ ...s, allCarTelemetry: data ?? [] }))),
+
+        onTelemetry2UpdateFor(slot, (data: CarTelemetry2) =>
+          setState((s) => ({ ...s, telemetry2: data }))),
+
+        onAllTelemetry2UpdateFor(slot, (data: CarTelemetry2[]) =>
+          setState((s) => ({ ...s, allCarTelemetry2: data ?? [] }))),
+
+        onAllDamageUpdateFor(slot, (data: CarDamage[]) =>
+          setState((s) => ({ ...s, allCarDamage: data ?? [] }))),
 
         onStatusUpdateFor(slot, (data: CarStatus) =>
           setState((s) => ({ ...s, status: data }))),
@@ -124,8 +145,13 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
         onFastestLapUpdateFor(slot, (data: { vehicleIdx: number; lapTimeMs: number }) =>
           setState((s) => ({ ...s, fastestLapCar: data.vehicleIdx, fastestLapMs: data.lapTimeMs }))),
 
+        // Stamp arrival time + monotonic seq so feeds can show stable
+        // timestamps and speak each event exactly once.
         onEventUpdateFor(slot, (data: EventData) =>
-          setState((s) => ({ ...s, events: [...s.events.slice(-99), data] }))),
+          setState((s) => ({
+            ...s,
+            events: [...s.events.slice(-99), { ...data, receivedAt: Date.now(), seq: nextEventSeq++ }],
+          }))),
 
         onDriverHistoryUpdateFor(slot, (data: DriverHistoryUpdate) =>
           setState((s) => ({
@@ -152,11 +178,12 @@ export function useTelemetry(slot: string = PRIMARY_SLOT) {
         // arriving — almost always a Windows Firewall block on this exe
         // or F1 25 sending to a destination this app isn't listening on.
         onPacketRxFor(slot, (data) =>
-          setPacketRx({
+          setPacketRx((prev) => ({
             count: data.count,
             lastPacketId: data.lastPacketId,
             lastSeenAt: Date.now(),
-          })),
+            packetFormat: data.packetFormat ?? prev.packetFormat,
+          }))),
       ]);
 
       const fns: Array<() => void> = [];

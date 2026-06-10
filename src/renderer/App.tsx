@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { TelemetryProvider } from './context/TelemetryContext';
 import { PrefsProvider } from './context/PrefsContext';
+import { RadioProvider } from './context/RadioContext';
 import { Dashboard } from './pages/DashboardUI';
 import { TimingTower } from './pages/TimingTowerUI';
 import { TrackMap } from './pages/TrackMapUI';
 import { VehicleStatus } from './pages/VehicleStatusUI';
 import { Session } from './pages/SessionUI';
 import { Engineer } from './pages/EngineerUI';
+import { BatteryCoach } from './pages/BatteryCoachUI';
 import { RadioConfig } from './pages/RadioConfigUI';
 import { Settings } from './pages/SettingsUI';
 import { LapHistory } from './pages/LapHistoryUI';
@@ -27,6 +29,7 @@ export type Page =
   | 'session'
   | 'rival'
   | 'engineer'
+  | 'battery'
   | 'radio'
   | 'settings';
 
@@ -38,7 +41,7 @@ function isOverlayMode(): boolean {
 
 const VALID_PAGES: Page[] = [
   'dashboard', 'timing', 'lap-history', 'analysis', 'trackmap',
-  'vehicle', 'session', 'rival', 'engineer', 'radio', 'settings',
+  'vehicle', 'session', 'rival', 'engineer', 'battery', 'radio', 'settings',
 ];
 
 function readPageFromUrl(): Page | null {
@@ -68,12 +71,16 @@ export function App() {
 
 function SinglePageWindow({ page }: { page: Page }) {
   useRivalHotkeys();
+  // Muted: the popout still shows radio feeds, but only the main window speaks
+  // (otherwise main + popout would run two detector loops and double audio).
   return (
-    <div className="app-shell single-page">
-      <main className="main-content single-page-main">
-        <PageRenderer page={page} />
-      </main>
-    </div>
+    <RadioProvider muted>
+      <div className="app-shell single-page">
+        <main className="main-content single-page-main">
+          <PageRenderer page={page} />
+        </main>
+      </div>
+    </RadioProvider>
   );
 }
 
@@ -83,12 +90,14 @@ function AppInner() {
   useAppUpdater();
 
   return (
-    <div className="app-shell">
-      <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
-      <main className="main-content">
-        <PageRenderer page={currentPage} />
-      </main>
-    </div>
+    <RadioProvider>
+      <div className="app-shell">
+        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+        <main className="main-content">
+          <PageRenderer page={currentPage} />
+        </main>
+      </div>
+    </RadioProvider>
   );
 }
 
@@ -103,6 +112,7 @@ function PageRenderer({ page }: { page: Page }) {
     case 'session':     return <Session />;
     case 'rival':       return <Rival />;
     case 'engineer':    return <Engineer />;
+    case 'battery':     return <BatteryCoach />;
     case 'radio':       return <RadioConfig />;
     case 'settings':    return <Settings />;
     default:            return <Dashboard />;

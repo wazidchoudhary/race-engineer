@@ -1,12 +1,12 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useTelemetryContext } from '../context/TelemetryContext';
-import { useAutoRadio } from '../hooks/useAutoRadio';
+import { useRadio } from '../context/RadioContext';
 import { usePushToTalk } from '../hooks/usePushToTalk';
 import { useStrategyCalls } from '../hooks/useStrategyCalls';
 import { globalInteractionTracker } from '../lib/emergency-gate';
-import { speak as ttsSpeakQueued, stop as ttsStop } from '../lib/tts-speaker';
+import { speak as ttsSpeakQueued } from '../lib/tts-speaker';
 import { api, type StrategyDecision } from '../lib/tauri-api';
-import type { TelemetrySources } from '../lib/strategy-pipeline';
+import { buildSnapshot, type TelemetrySources } from '../lib/strategy-pipeline';
 
 const MAX_ERS = 4_000_000;
 
@@ -26,22 +26,16 @@ export function Engineer() {
   const ctx = useTelemetryContext();
   const { lapData, playerCarIndex, status, damage, session, participants } = ctx;
 
-  const [ttsEnabled, setTtsEnabled] = useState(false);
-  const [ttsVoice, setTtsVoice] = useState('en-GB-RyanNeural');
   const [premium, setPremium] = useState(false);
   const [lastDecision, setLastDecision] = useState<StrategyDecision | null>(null);
 
   useEffect(() => {
-    api.loadSettings?.().then((s: any) => {
-      if (s?.tts?.enabled != null) setTtsEnabled(s.tts.enabled);
-      if (s?.tts?.voice) setTtsVoice(s.tts.voice);
-    }).catch(() => {});
     api.getPremium?.().then((p) => setPremium(!!p?.premium)).catch(() => {});
   }, []);
 
-  // Auto-radio (rule-based). The hook handles its own queued TTS via tts-speaker
-  // and respects the emergency-idle gate internally — we just supply settings.
-  const { messages, clearMessages } = useAutoRadio(ctx, ttsEnabled, ttsVoice);
+  // Auto-radio now lives in RadioContext at app level (voice works on every
+  // page); this page renders the feed and owns the master Voice toggle.
+  const { messages, clearMessages, ttsEnabled, setTtsEnabled, ttsVoice } = useRadio();
 
   // Strategy pipeline — feeds TelemetrySources
   const src: TelemetrySources = useMemo(() => ({
@@ -104,11 +98,12 @@ export function Engineer() {
       return;
     }
 
-    // Premium path: route to structured strategy call
-    strategy.ask(q);
-
+    // Premium path: one prose call. (Routing the same question through the
+    // structured strategy pipeline too caused double token spend and two
+    // overlapping spoken replies.)
     try {
-      const result = await api.askEngineer({ question: q, context: {}, mode: 'DRIVER_RADIO' });
+      const snapshot = buildSnapshot(src);
+      const result = await api.askEngineer({ question: q, context: snapshot ?? {}, mode: 'DRIVER_RADIO' });
       if (result?.error === 'premium_required') {
         setResponse(result.message || 'Premium required.');
       } else if (result?.error) {
@@ -124,7 +119,7 @@ export function Engineer() {
     } finally {
       setLoading(false);
     }
-  }, [query, loading, premium, strategy, ttsEnabled, ttsVoice]);
+  }, [query, loading, premium, src, ttsEnabled, ttsVoice]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuery(); }
@@ -170,7 +165,7 @@ export function Engineer() {
         <div className="engineer-actions">
           <label className="toggle-label">
             <input type="checkbox" checked={ttsEnabled}
-              onChange={(e) => { setTtsEnabled(e.target.checked); if (!e.target.checked) ttsStop(); }} />
+              onChange={(e) => setTtsEnabled(e.target.checked)} />
             Voice
           </label>
           <button className="btn-small" onClick={clearMessages}>Clear</button>

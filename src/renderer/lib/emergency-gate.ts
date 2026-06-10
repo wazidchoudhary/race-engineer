@@ -24,27 +24,26 @@ export const EMERGENCY_CATEGORIES = new Set<string>([
 export const EMERGENCY_URGENCIES = new Set<string>(['critical', 'high']);
 
 // Specific situations that override the category gate — true emergencies that
-// must always be spoken regardless of idle state.
+// must always be spoken regardless of idle state. Names must match the
+// canonical situation keys in `radio-canonical.ts` / `useAutoRadio.ts`.
 export const ALWAYS_SPEAK_SITUATIONS = new Set<string>([
-  'sc_deployed',
-  'vsc_deployed',
+  'safety_car',
+  'virtual_sc',
   'red_flag',
   'yellow_flag',
-  'double_yellow',
-  'tyre_wear_critical',
-  'tyre_cliff',
-  'lockup_flat_spot',
-  'front_wing_damage',
-  'engine_damage',
-  'gearbox_damage',
-  'ers_fault',
-  'spin',
-  'rain_heavier',
-  'light_rain_begins',
-  'fuel_critical',
-  'pit_limiter',
-  'emergency_stop',
   'blue_flag',
+  'critical_wear',
+  'puncture',
+  'wing_damage',
+  'floor_damage',
+  'engine_damage',
+  'gearbox_issue',
+  'ers_fault',
+  'rain_started',
+  'rain_incoming',
+  'fuel_critical',
+  'box_now',
+  'sc_pit_opportunity',
 ]);
 
 export interface SpeakDecisionInput {

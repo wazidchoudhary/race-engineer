@@ -133,7 +133,7 @@ export function buildSnapshot(src: TelemetrySources): any {
       compound: compoundName(sts?.visualTyreCompound ?? -1),
       tyreAgeLaps: sts?.tyresAgeLaps ?? null,
       gapToAheadSec: ms2s(lap.deltaToCarAheadMs ?? 0),
-      lastLapSec: ms2s(lap.lastLapTimeInMS ?? 0),
+      lastLapSec: ms2s(lap.lastLapTimeMs ?? 0),
       resultStatus: lap.resultStatus ?? 0,
       pitStatus: lap.pitStatus ?? 0,
     };
@@ -147,8 +147,8 @@ export function buildSnapshot(src: TelemetrySources): any {
     .filter(Boolean);
 
   // Forecast trimming (first 5 samples only)
-  const forecast = Array.isArray(session.weatherForecastSamples)
-    ? session.weatherForecastSamples.slice(0, 5).map((s: any) => ({
+  const forecast = Array.isArray(session.weatherForecast)
+    ? session.weatherForecast.slice(0, 5).map((s: any) => ({
         timeOffsetMin: s.timeOffset,
         weather: s.weather,
         trackTemp: s.trackTemp,
@@ -192,17 +192,17 @@ export function buildSnapshot(src: TelemetrySources): any {
       gridPosition: playerLap.gridPosition,
       compound: compoundName(status?.visualTyreCompound ?? -1),
       tyreAgeLaps: status?.tyresAgeLaps ?? 0,
-      lastLapSec: ms2s(playerLap.lastLapTimeInMS ?? 0),
-      currentLapSec: ms2s(playerLap.currentLapTimeInMS ?? 0),
-      sector1Sec: ms2s(playerLap.sector1TimeInMS ?? 0),
-      sector2Sec: ms2s(playerLap.sector2TimeInMS ?? 0),
+      lastLapSec: ms2s(playerLap.lastLapTimeMs ?? 0),
+      currentLapSec: ms2s(playerLap.currentLapTimeMs ?? 0),
+      sector1Sec: ms2s(playerLap.sector1TimeMs ?? 0),
+      sector2Sec: ms2s(playerLap.sector2TimeMs ?? 0),
       pace,
       wear: { FL: Math.round(wearFL), FR: Math.round(wearFR), RL: Math.round(wearRL), RR: Math.round(wearRR), max: Math.round(maxWear) },
       temps: {
-        FL: telemetry?.tyresSurfaceTemperature?.[2],
-        FR: telemetry?.tyresSurfaceTemperature?.[3],
-        RL: telemetry?.tyresSurfaceTemperature?.[0],
-        RR: telemetry?.tyresSurfaceTemperature?.[1],
+        FL: telemetry?.tyreSurfaceTemp?.[2],
+        FR: telemetry?.tyreSurfaceTemp?.[3],
+        RL: telemetry?.tyreSurfaceTemp?.[0],
+        RR: telemetry?.tyreSurfaceTemp?.[1],
       },
       damage: {
         frontWing: Math.max(damage?.frontLeftWingDamage ?? 0, damage?.frontRightWingDamage ?? 0),

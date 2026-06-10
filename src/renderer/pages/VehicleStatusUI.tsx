@@ -15,7 +15,8 @@ const COMPOUND_NAMES: Record<number, { label: string; color: string }> = {
   8:  { label: 'Wet', color: '#4477FF' },
 };
 
-const ERS_MODES = ['None', 'Medium', 'Overtake', 'Hotlap'];
+// Game enum order: 0=None, 1=Medium, 2=Hotlap, 3=Boost (ex-Overtake).
+const ERS_MODES = ['None', 'Medium', 'Hotlap', 'Boost'];
 const FUEL_MIXES = ['Lean', 'Standard', 'Rich', 'Max'];
 
 function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../lib/tauri-api';
 import type { DriverNameMask } from '../../shared/types/store';
 import { defaultRadioConfig, normalizeRadioConfig, type RadioConfig } from '../lib/radio-canonical';
@@ -63,6 +63,10 @@ const PrefsContext = createContext<PrefsContextValue | null>(null);
 
 export function PrefsProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefsState] = useState<AppPrefs>(DEFAULT_PREFS);
+  // Mirror of the latest prefs so rapid setPrefs calls don't clobber each
+  // other through a stale render-time closure.
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
 
   const load = useCallback(async () => {
     try {
@@ -98,7 +102,8 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   useEffect(() => { load().catch(() => {}); }, [load]);
 
   const setPrefs = useCallback(async (patch: Partial<AppPrefs>) => {
-    const next = { ...prefs, ...patch };
+    const next = { ...prefsRef.current, ...patch };
+    prefsRef.current = next;
     setPrefsState(next);
     try {
       const prev: any = (await api.loadSettings?.()) ?? {};
@@ -138,7 +143,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* ignore */ }
     } catch { /* ignore persistence errors */ }
-  }, [prefs]);
+  }, []);
 
   return (
     <PrefsContext.Provider value={{ ...prefs, setPrefs, reload: load }}>

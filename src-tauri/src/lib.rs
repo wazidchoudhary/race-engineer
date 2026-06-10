@@ -70,15 +70,20 @@ fn stop_telemetry(
 ) -> Result<Value, String> {
     let mut s = state.lock().map_err(|_| "Lock error")?;
     let slot_name = slot.unwrap_or_else(|| PRIMARY_SLOT.to_string());
-    if let Some(h) = s.handles.remove(&slot_name) {
-        let _ = h.shutdown.send(());
-    }
-    let event = if slot_name == PRIMARY_SLOT {
-        "telemetry-stopped".to_string()
-    } else {
-        format!("telemetry-stopped::{}", slot_name)
+    let had_listener = match s.handles.remove(&slot_name) {
+        Some(h) => { let _ = h.shutdown.send(()); true }
+        None => false,
     };
-    let _ = app.emit(&event, json!({ "slot": slot_name.clone() }));
+    // The listener task emits `telemetry-stopped` itself when it unwinds;
+    // only emit here when there was nothing running (so the UI still syncs).
+    if !had_listener {
+        let event = if slot_name == PRIMARY_SLOT {
+            "telemetry-stopped".to_string()
+        } else {
+            format!("telemetry-stopped::{}", slot_name)
+        };
+        let _ = app.emit(&event, json!({ "slot": slot_name.clone() }));
+    }
     Ok(json!({ "success": true, "slot": slot_name }))
 }
 
@@ -609,12 +614,16 @@ fn get_lookups() -> Value {
             "20":"Baku","21":"Sakhir Short","22":"Silverstone Short",
             "23":"Texas Short","24":"Suzuka Short","25":"Hanoi",
             "26":"Zandvoort","27":"Imola","28":"Portimao","29":"Jeddah",
-            "30":"Miami","31":"Las Vegas","32":"Losail"
+            "30":"Miami","31":"Las Vegas","32":"Losail",
+            "39":"Silverstone (Reverse)","40":"Austria (Reverse)",
+            "41":"Zandvoort (Reverse)","42":"Madrid"
         },
         "SESSION_TYPES": {
             "0":"Unknown","1":"P1","2":"P2","3":"P3","4":"Short Practice",
             "5":"Q1","6":"Q2","7":"Q3","8":"Short Q","9":"OSQ",
-            "10":"Race","11":"Race 2","12":"Race 3","13":"Time Trial"
+            "10":"SQ1","11":"SQ2","12":"SQ3","13":"Short Sprint Q",
+            "14":"OSQ Sprint","15":"Race","16":"Race 2","17":"Race 3",
+            "18":"Time Trial"
         },
         "WEATHER": {
             "0":"Clear","1":"Light Cloud","2":"Overcast",
@@ -623,7 +632,10 @@ fn get_lookups() -> Value {
         "TEAM_COLORS": {
             "0":"#27F4D2","1":"#E80020","2":"#3671C6","3":"#64C4FF",
             "4":"#229971","5":"#0093CC","6":"#6692FF","7":"#B6BABD",
-            "8":"#FF8000","9":"#52E252","41":"#3671C6","253":"#FFFFFF"
+            "8":"#FF8000","9":"#52E252","41":"#3671C6","253":"#FFFFFF",
+            "476":"#27F4D2","477":"#E80020","478":"#3671C6","479":"#64C4FF",
+            "480":"#229971","481":"#0093CC","482":"#6692FF","483":"#B6BABD",
+            "484":"#FF8000","485":"#F50537","486":"#B59A57"
         },
         "TYRE_COMPOUNDS": {
             "16":{"label":"S","name":"Soft","color":"#FF3333"},
@@ -893,27 +905,61 @@ async fn call_strategy(
 // TTS via Edge TTS WebSocket (Microsoft neural voices).
 // Returns base64-encoded MP3 audio.
 
+const EDGE_TTS_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+// Chromium version the DRM token claims to be from — keep in sync with the
+// Sec-MS-GEC-Version param and the User-Agent below.
+const EDGE_TTS_CHROMIUM: &str = "130.0.2849.68";
+
+/// Microsoft's DRM gate for the unofficial Edge TTS endpoint (required since
+/// late 2024): SHA-256 of (Windows file time rounded down to 5 minutes +
+/// trusted client token), upper-case hex.
+fn sec_ms_gec() -> String {
+    use sha2::{Digest, Sha256};
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut ticks = unix + 11_644_473_600; // seconds since 1601-01-01
+    ticks -= ticks % 300;                  // round down to 5-minute boundary
+    let ticks_100ns = (ticks as u128) * 10_000_000;
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{}{}", ticks_100ns, EDGE_TTS_TOKEN).as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect()
+}
+
 #[derive(Deserialize)]
 struct TtsPayload {
     text: String,
     voice: Option<String>,
+    /// Playback rate multiplier (1.0 = normal). Mapped to SSML prosody.
+    rate: Option<f32>,
 }
 
 #[tauri::command]
 async fn tts_speak(payload: TtsPayload) -> Result<String, String> {
     // Edge TTS via the unofficial WebSocket API
     let voice = payload.voice.as_deref().unwrap_or("en-GB-RyanNeural");
-    edge_tts(&payload.text, voice).await
+    let rate = payload.rate.unwrap_or(1.0).clamp(0.5, 2.0);
+    edge_tts(&payload.text, voice, rate).await.map_err(|e| {
+        log::error!("edge_tts failed: {}", e);
+        e
+    })
 }
 
-async fn edge_tts(text: &str, voice: &str) -> Result<String, String> {
+async fn edge_tts(text: &str, voice: &str, rate: f32) -> Result<String, String> {
     use tokio_tungstenite::{connect_async, tungstenite::Message};
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use futures_util::{SinkExt, StreamExt};
 
-    let token = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
     let url = format!(
-        "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken={}&ConnectionId={}",
-        token,
+        "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken={}&Sec-MS-GEC={}&Sec-MS-GEC-Version=1-{}&ConnectionId={}",
+        EDGE_TTS_TOKEN,
+        sec_ms_gec(),
+        EDGE_TTS_CHROMIUM,
         uuid_v4()
     );
 
@@ -925,9 +971,12 @@ async fn edge_tts(text: &str, voice: &str) -> Result<String, String> {
         request_id, timestamp
     );
 
+    let rate_pct = ((rate - 1.0) * 100.0).round() as i32;
     let ssml = format!(
-        "<speak version='1.0' xml:lang='en-US'><voice name='{}'><prosody rate='+0%' pitch='+0Hz'>{}</prosody></voice></speak>",
+        "<speak version='1.0' xml:lang='en-US'><voice name='{}'><prosody rate='{}{}%' pitch='+0Hz'>{}</prosody></voice></speak>",
         voice,
+        if rate_pct >= 0 { "+" } else { "" },
+        rate_pct,
         text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
     );
 
@@ -936,7 +985,33 @@ async fn edge_tts(text: &str, voice: &str) -> Result<String, String> {
         request_id, timestamp, ssml
     );
 
-    let (ws_stream, _) = connect_async(&url).await.map_err(|e| format!("TTS connect: {}", e))?;
+    // Edge-like handshake headers — the endpoint rejects bare clients.
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| format!("TTS request: {}", e))?;
+    {
+        let headers = request.headers_mut();
+        let ua = format!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{} Safari/537.36 Edg/{}",
+            EDGE_TTS_CHROMIUM.split('.').next().unwrap_or("130"),
+            EDGE_TTS_CHROMIUM
+        );
+        headers.insert("User-Agent", ua.parse().map_err(|_| "bad UA header")?);
+        headers.insert(
+            "Origin",
+            "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
+                .parse()
+                .map_err(|_| "bad Origin header")?,
+        );
+        headers.insert("Pragma", "no-cache".parse().map_err(|_| "bad header")?);
+        headers.insert("Cache-Control", "no-cache".parse().map_err(|_| "bad header")?);
+        headers.insert(
+            "Accept-Language",
+            "en-US,en;q=0.9".parse().map_err(|_| "bad header")?,
+        );
+    }
+
+    let (ws_stream, _) = connect_async(request).await.map_err(|e| format!("TTS connect: {}", e))?;
     let (mut write, mut read) = ws_stream.split();
 
     write.send(Message::Text(config_msg.into())).await.map_err(|e| e.to_string())?;
