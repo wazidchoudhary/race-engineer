@@ -1,7 +1,7 @@
 {
   "name": "apex-engineer",
   "productName": "Apex Engineer",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "F1 25 Race Telemetry & AI Engineer — Tauri + React",
   "private": true,
   "scripts": {
