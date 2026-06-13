@@ -75,6 +75,11 @@ export interface CoachAdvice {
   next: PlanSegment | null;
   /** Metres until `next` begins. */
   nextInM: number | null;
+  /** The next lift-and-coast segment ahead, found independently of `next` so
+   *  a closer boost/medium zone can't suppress the early lift heads-up. */
+  nextLift: PlanSegment | null;
+  /** Metres until `nextLift` begins. */
+  nextLiftInM: number | null;
   instruction: string;
   stance: BatteryStance;
   stanceText: string;
@@ -415,6 +420,19 @@ export function adviceAt(plan: LapPlan, input: CoachLiveInput, raceMode: 'race' 
   }
   const nextInM = next ? nextDist * plan.lengthM : null;
 
+  // Nearest lift-and-coast zone ahead, found independently of `next`. A boost
+  // or medium deploy zone sitting between the car and the lift would otherwise
+  // become `next` and suppress the early "lift and coast" call until the car
+  // was already at the lift point — too late to act on.
+  let nextLift: PlanSegment | null = null;
+  let nextLiftDist = Infinity;
+  for (const s of plan.segments) {
+    if (s.mode !== 'lift' || s === segment) continue;
+    const d = fwd(pct, s.fromPct);
+    if (d < nextLiftDist) { nextLiftDist = d; nextLift = s; }
+  }
+  const nextLiftInM = nextLift ? nextLiftDist * plan.lengthM : null;
+
   // Stance overrides the plan at the extremes.
   let instruction: string;
   if (stance === 'critical') {
@@ -436,6 +454,8 @@ export function adviceAt(plan: LapPlan, input: CoachLiveInput, raceMode: 'race' 
     segment,
     next,
     nextInM,
+    nextLift,
+    nextLiftInM,
     instruction,
     stance,
     stanceText: stanceText(stance, raceMode),

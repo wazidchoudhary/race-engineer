@@ -148,7 +148,9 @@ export function Engineer() {
   const compound = status ? COMPOUND_INFO[status.visualTyreCompound] : null;
   const maxWear = damage ? Math.max(...damage.tyresWear.map((w: number) => Math.round(w))) : 0;
   const ersPct = status ? ((status.ersStoreEnergy / MAX_ERS) * 100).toFixed(0) : '--';
-  const fuelLaps = status ? status.fuelRemainingLaps.toFixed(1) : '--';
+  // MFD fuel delta: + laps of fuel extra in hand, − laps short of the finish.
+  const fuelLaps = status ? `${status.fuelRemainingLaps >= 0 ? '+' : ''}${status.fuelRemainingLaps.toFixed(1)}` : '--';
+  const fuelDown = status ? status.fuelRemainingLaps < 0 : false;
   const gapAhead = playerLap && playerLap.deltaToCarAheadMs > 0
     ? `${(playerLap.deltaToCarAheadMs / 1000).toFixed(1)}s` : '--';
   const scLabel = session ? SC_LABELS[session.safetyCarStatus] || 'Green' : '--';
@@ -182,7 +184,7 @@ export function Engineer() {
         <StatusItem label="Wear" value={damage ? `${maxWear}%` : '--'}
           warn={maxWear > 60} critical={maxWear > 80} />
         <StatusItem label="ERS" value={`${ersPct}%`} />
-        <StatusItem label="Fuel" value={`${fuelLaps} laps`} />
+        <StatusItem label="Fuel" value={`${fuelLaps} laps`} critical={fuelDown} />
         <StatusItem label="Gap Ahead" value={gapAhead} />
         <StatusItem label="Flags" value={scLabel} critical={session ? session.safetyCarStatus > 0 : false} />
       </div>

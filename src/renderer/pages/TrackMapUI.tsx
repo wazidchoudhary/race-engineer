@@ -634,6 +634,43 @@ export function TrackMap() {
         ny =  tx / m;
       }
 
+      // ── Out-of-session cars (DNF / DSQ / not-classified / retired) ─────────
+      // Their motion freezes wherever they stopped — often right on the racing
+      // line or at the pit entry. Tuck a small dimmed marker off the line so it
+      // never blocks the track, tag it with the retirement reason, and skip the
+      // full dot / name-pill / lap-state treatment used for running cars.
+      if (lap.resultStatus >= 4) {
+        const OUT_LABELS: Record<number, string> = { 4: 'DNF', 5: 'DSQ', 6: 'NC', 7: 'RET' };
+        const tuck = 16 * K;
+        const ox = cx + nx * tuck;
+        const oy = cy + ny * tuck;
+        const rOut = 4.5 * K;
+        const outDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        outDot.setAttribute('cx', String(ox));
+        outDot.setAttribute('cy', String(oy));
+        outDot.setAttribute('r', String(rOut));
+        outDot.setAttribute('fill', '#3a3a48');
+        outDot.setAttribute('stroke', '#0c0c14');
+        outDot.setAttribute('stroke-width', String(0.8 * K));
+        outDot.setAttribute('opacity', '0.5');
+        outDot.classList.add('car-dot');
+        root.appendChild(outDot);
+
+        const outTag = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        outTag.setAttribute('x', String(ox));
+        outTag.setAttribute('y', String(oy + rOut + 7 * K));
+        outTag.setAttribute('text-anchor', 'middle');
+        outTag.setAttribute('fill', '#8890a0');
+        outTag.setAttribute('font-size', String(6.5 * K));
+        outTag.setAttribute('font-weight', '700');
+        outTag.setAttribute('letter-spacing', String(0.5 * K));
+        outTag.setAttribute('opacity', '0.75');
+        outTag.classList.add('car-name-label');
+        outTag.textContent = OUT_LABELS[lap.resultStatus] ?? 'OUT';
+        root.appendChild(outTag);
+        return;
+      }
+
       const p = participants?.participants?.[idx];
       const color = teamColor(p?.teamId ?? -1);
       const isPlayer = idx === playerCarIndex;

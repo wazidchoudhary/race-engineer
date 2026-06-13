@@ -21,6 +21,10 @@ export function useLapHistory(telemetry: TelemetryState) {
   const [completedLaps, setCompletedLaps] = useState<CompletedLap[]>([]);
   const prevLapNumRef = useRef<number | null>(null);
   const prevFuelRef = useRef<number | null>(null);
+  // S1/S2 of the lap in progress, captured each tick while both are populated.
+  // At the rollover tick the live sectors have already reset to 0, so the
+  // completed lap's sectors (and the derived S3) come from this snapshot.
+  const prevSectorsRef = useRef<{ s1: number; s2: number } | null>(null);
 
   useEffect(() => {
     const playerLap = telemetry.lapData[telemetry.playerCarIndex];
@@ -30,21 +34,28 @@ export function useLapHistory(telemetry: TelemetryState) {
     if (!playerLap) return;
 
     const currentLapNum = playerLap.currentLapNum;
+    const sectorsValid = playerLap.sector1TimeMs > 0 && playerLap.sector2TimeMs > 0;
 
     if (prevLapNumRef.current === null) {
       prevLapNumRef.current = currentLapNum;
       prevFuelRef.current = status?.fuelInTank ?? null;
+      if (sectorsValid) {
+        prevSectorsRef.current = { s1: playerLap.sector1TimeMs, s2: playerLap.sector2TimeMs };
+      }
       return;
     }
 
     // Lap completed when lap number increments
     if (currentLapNum > prevLapNumRef.current) {
       const completedLapNum = prevLapNumRef.current;
+      // The live S1/S2 have already reset for the new lap, so take the sectors
+      // captured on the previous tick and derive S3 = lap − S1 − S2 from them.
+      const snap = prevSectorsRef.current;
+      const s1 = snap?.s1 ?? 0;
+      const s2 = snap?.s2 ?? 0;
       const sector3Ms =
-        playerLap.lastLapTimeMs > 0 &&
-        playerLap.sector1TimeMs > 0 &&
-        playerLap.sector2TimeMs > 0
-          ? playerLap.lastLapTimeMs - playerLap.sector1TimeMs - playerLap.sector2TimeMs
+        playerLap.lastLapTimeMs > 0 && s1 > 0 && s2 > 0
+          ? playerLap.lastLapTimeMs - s1 - s2
           : 0;
 
       const fuelNow = status?.fuelInTank ?? null;
@@ -56,9 +67,9 @@ export function useLapHistory(telemetry: TelemetryState) {
       const lap: CompletedLap = {
         lapNumber: completedLapNum,
         lapTimeMs: playerLap.lastLapTimeMs,
-        sector1TimeMs: playerLap.sector1TimeMs,
-        sector2TimeMs: playerLap.sector2TimeMs,
-        sector3TimeMs: sector3Ms,
+        sector1TimeMs: s1,
+        sector2TimeMs: s2,
+        sector3TimeMs: sector3Ms > 0 ? sector3Ms : 0,
         tyreCompound: status?.visualTyreCompound ?? null,
         tyreAgeLaps: status?.tyresAgeLaps ?? 0,
         pitLap: playerLap.pitStatus > 0,
@@ -70,6 +81,13 @@ export function useLapHistory(telemetry: TelemetryState) {
       };
 
       setCompletedLaps((prev) => [...prev, lap]);
+      // New lap has no sectors yet — start its snapshot fresh.
+      prevSectorsRef.current = null;
+    }
+
+    // Keep the in-progress lap's sectors snapshotted for the next rollover.
+    if (sectorsValid) {
+      prevSectorsRef.current = { s1: playerLap.sector1TimeMs, s2: playerLap.sector2TimeMs };
     }
 
     prevLapNumRef.current = currentLapNum;
@@ -86,6 +104,7 @@ export function useLapHistory(telemetry: TelemetryState) {
     setCompletedLaps([]);
     prevLapNumRef.current = null;
     prevFuelRef.current = null;
+    prevSectorsRef.current = null;
   }, [telemetry.session?.trackId]);
 
   const bestLapMs =

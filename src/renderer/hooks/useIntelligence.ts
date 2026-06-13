@@ -24,6 +24,7 @@ export function useIntelligence(state: TelemetryState): IntelligenceData {
   const strategyEngine = useMemo(() => new StrategyEngine(), []);
 
   const lastLapRef = useRef<number>(0);
+  const lastTrackIdRef = useRef<number | null>(null);
 
   // Process on each render (cheap operations)
   let wearPrediction: WearPrediction | null = null;
@@ -67,7 +68,12 @@ export function useIntelligence(state: TelemetryState): IntelligenceData {
     wearPrediction = wearPredictor.predict(currentLap);
   }
 
-  // Pace analysis
+  // Pace analysis — purple sectors and personal best are per-session, so reset
+  // when the track changes (the analyzer instance lives for the whole app run).
+  if (state.session && state.session.trackId !== lastTrackIdRef.current) {
+    paceAnalyzer.reset();
+    lastTrackIdRef.current = state.session.trackId;
+  }
   if (state.lapData.length > 0) {
     paceAnalyzer.processLapData(state.lapData, state.playerCarIndex);
     if (state.session) {

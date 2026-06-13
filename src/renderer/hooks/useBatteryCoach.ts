@@ -164,15 +164,19 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
     }
 
     // Look-ahead for lift-and-coast: call it ~150 m early so the driver can act.
-    if (advice.next && advice.next.mode === 'lift' && advice.nextInM != null && advice.nextInM < 150) {
-      const preKey = `pre:${advice.next.fromPct.toFixed(3)}`;
-      const segKey = `seg:${advice.next.fromPct.toFixed(3)}`;
+    // Keyed off advice.nextLift (the nearest lift zone regardless of intervening
+    // deploy zones) — using advice.next here meant a closer boost/medium segment
+    // swallowed the heads-up and the lift call only landed once the car was
+    // already at the braking zone.
+    if (advice.nextLift && advice.nextLiftInM != null && advice.nextLiftInM < 150) {
+      const preKey = `pre:${advice.nextLift.fromPct.toFixed(3)}`;
+      const segKey = `seg:${advice.nextLift.fromPct.toFixed(3)}`;
       if (!spokenThisLap.current.has(preKey) && !spokenThisLap.current.has(segKey)) {
         spokenThisLap.current.add(preKey);
         // Also mark the entry key — the same line would otherwise repeat
         // seconds later when the car enters the segment.
         spokenThisLap.current.add(segKey);
-        pushCall(advice.next.voice, advice.next.priority, preKey);
+        pushCall(advice.nextLift.voice, advice.nextLift.priority, preKey);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

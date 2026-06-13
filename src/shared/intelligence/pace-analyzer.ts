@@ -35,6 +35,11 @@ export class PaceAnalyzer {
 
   private personalBestLap: SectorTime | null = null;
   private lastLapSectors: Map<number, SectorTime> = new Map();
+  /** Last seen currentLapNum per car — used to detect lap rollovers. */
+  private carLastLap: Map<number, number> = new Map();
+  /** Most recent in-lap S1/S2 per car, snapshotted while both are present so
+   *  they can be paired with lastLapTimeMs the instant the lap rolls over. */
+  private carSectorSnap: Map<number, { s1: number; s2: number }> = new Map();
 
   /** Reset for new session */
   reset(): void {
@@ -48,6 +53,8 @@ export class PaceAnalyzer {
     };
     this.personalBestLap = null;
     this.lastLapSectors.clear();
+    this.carLastLap.clear();
+    this.carSectorSnap.clear();
   }
 
   /** Process lap data for all cars to update purple sectors */
@@ -56,7 +63,8 @@ export class PaceAnalyzer {
       const car = lapData[i];
       if (!car || car.resultStatus < 2) continue; // Skip inactive
 
-      // Only process completed sectors
+      // Purple S1/S2 come straight from the live current-lap sector times — the
+      // game reports each the moment that sector is crossed, so they're valid.
       if (car.sector1TimeMs > 0 && car.sector1TimeMs < this.purpleSectors.sector1Ms) {
         this.purpleSectors.sector1Ms = car.sector1TimeMs;
         this.purpleSectors.sector1CarIdx = i;
@@ -66,30 +74,48 @@ export class PaceAnalyzer {
         this.purpleSectors.sector2CarIdx = i;
       }
 
-      // Derive sector 3 from last lap time
-      if (car.lastLapTimeMs > 0 && car.sector1TimeMs > 0 && car.sector2TimeMs > 0) {
-        const s3 = car.lastLapTimeMs - car.sector1TimeMs - car.sector2TimeMs;
-        if (s3 > 0) {
-          const sectors: SectorTime = {
-            sector1Ms: car.sector1TimeMs,
-            sector2Ms: car.sector2TimeMs,
-            sector3Ms: s3,
-          };
-          this.lastLapSectors.set(i, sectors);
+      // S3 has no telemetry field — derive it as lap − S1 − S2. At the rollover
+      // the live S1/S2 have already reset to 0, so we pair lastLapTimeMs with the
+      // S1/S2 snapshotted on an earlier tick. Consume the snapshot at rollover
+      // BEFORE refreshing it below, so a sector freshly crossed on the new lap
+      // can never overwrite the completed lap's values before we read them.
+      const lapNum = car.currentLapNum ?? 0;
+      const prevLap = this.carLastLap.get(i);
+      if (prevLap !== undefined && lapNum > prevLap && car.lastLapTimeMs > 0) {
+        const snap = this.carSectorSnap.get(i);
+        if (snap) {
+          const s3 = car.lastLapTimeMs - snap.s1 - snap.s2;
+          if (s3 > 0 && s3 < 180_000) {
+            const sectors: SectorTime = {
+              sector1Ms: snap.s1,
+              sector2Ms: snap.s2,
+              sector3Ms: s3,
+            };
+            this.lastLapSectors.set(i, sectors);
 
-          if (s3 < this.purpleSectors.sector3Ms) {
-            this.purpleSectors.sector3Ms = s3;
-            this.purpleSectors.sector3CarIdx = i;
-          }
+            if (s3 < this.purpleSectors.sector3Ms) {
+              this.purpleSectors.sector3Ms = s3;
+              this.purpleSectors.sector3CarIdx = i;
+            }
 
-          // Update personal best
-          if (i === playerCarIndex) {
-            if (!this.personalBestLap || car.lastLapTimeMs < this.getLapTime(this.personalBestLap)) {
+            // Update personal best off the just-completed lap time.
+            if (i === playerCarIndex &&
+                (!this.personalBestLap || car.lastLapTimeMs < this.getLapTime(this.personalBestLap))) {
               this.personalBestLap = sectors;
             }
           }
         }
+        // Start the next lap's snapshot fresh.
+        this.carSectorSnap.delete(i);
       }
+
+      // Snapshot the in-progress lap's S1/S2 for the NEXT rollover (after the
+      // consume above, so the rollover tick can't clobber the completed lap).
+      if (car.sector1TimeMs > 0 && car.sector2TimeMs > 0) {
+        this.carSectorSnap.set(i, { s1: car.sector1TimeMs, s2: car.sector2TimeMs });
+      }
+
+      this.carLastLap.set(i, lapNum);
     }
   }
 

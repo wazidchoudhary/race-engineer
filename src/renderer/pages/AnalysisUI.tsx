@@ -121,7 +121,11 @@ function FuelPanel({ completedLaps, status }: {
         <StatRow label="Start Fuel" value={formatFuel(startFuel)} />
         <StatRow label="Current Fuel" value={formatFuel(currentFuel)} />
         <StatRow label="Avg Burn/Lap" value={avgBurn != null ? `${avgBurn.toFixed(3)} kg` : '--'} />
-        <StatRow label="Laps Left (game)" value={fuelLapsLeft != null ? fuelLapsLeft.toFixed(1) : '--'} />
+        {/* Game MFD fuel delta: + = laps of fuel extra, − = laps short. */}
+        <StatRow
+          label="Fuel Extra/Down (game)"
+          value={fuelLapsLeft != null ? `${fuelLapsLeft >= 0 ? '+' : ''}${fuelLapsLeft.toFixed(1)} laps` : '--'}
+          valueClass={fuelLapsLeft == null ? '' : fuelLapsLeft >= 0 ? 'status-on' : 'status-critical'} />
       </div>
     </div>
   );
@@ -152,7 +156,11 @@ function PitLossPanel({ playerLap, lapData, pitLossSec }: {
   }).length;
 
   const projectedPos = Math.min(cars.length, playerLap.carPosition + carsLost);
-  const gapDeltaSec = (gapBehindMs - pitLossMs) / 1000;
+  // Free-stop margin as the post-stop time swing vs. the car behind:
+  // negative = you still emerge clear (the stop is "free"), positive = you'd
+  // drop into/behind them. Sign reversed from the old gap-minus-loss form so a
+  // safe stop reads as a minus; colour still flags safe (green) vs. risky (red).
+  const gapDeltaSec = (pitLossMs - gapBehindMs) / 1000;
 
   return (
     <div className="panel">
@@ -163,7 +171,7 @@ function PitLossPanel({ playerLap, lapData, pitLossSec }: {
         <StatRow
           label="Free Stop Margin"
           value={gapBehindMs > 0 ? `${gapDeltaSec >= 0 ? '+' : ''}${gapDeltaSec.toFixed(2)}s` : '--'}
-          valueClass={gapBehindMs > 0 ? (gapDeltaSec >= 0 ? 'status-on' : 'status-critical') : ''}
+          valueClass={gapBehindMs > 0 ? (gapDeltaSec <= 0 ? 'status-on' : 'status-critical') : ''}
         />
       </div>
     </div>

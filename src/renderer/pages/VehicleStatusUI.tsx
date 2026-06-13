@@ -178,7 +178,13 @@ export function VehicleStatus() {
               <div className="stat-list">
                 <StatItem label="In Tank" value={`${status.fuelInTank.toFixed(2)} kg`} />
                 <StatItem label="Capacity" value={`${status.fuelCapacity.toFixed(1)} kg`} />
-                <StatItem label="Laps Left" value={status.fuelRemainingLaps.toFixed(2)} />
+                {/* fuelRemainingLaps is the game's MFD fuel DELTA, not absolute
+                    laps remaining: positive = laps of fuel EXTRA in hand,
+                    negative = laps DOWN / short of the finish. */}
+                <StatItem
+                  label="Fuel (extra/down)"
+                  value={`${status.fuelRemainingLaps >= 0 ? '+' : ''}${status.fuelRemainingLaps.toFixed(2)} laps`}
+                  color={status.fuelRemainingLaps >= 0 ? '#39b54a' : '#dc0000'} />
               </div>
             </div>
 

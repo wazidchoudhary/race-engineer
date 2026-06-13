@@ -453,17 +453,20 @@ function runDetectors(ctx: TelemetryContextValue, mem: DetectionMemory, emit: Em
   }
 
   // ── fuel ──
+  // fuelRemainingLaps is the MFD fuel DELTA: laps of fuel in hand (+) or short
+  // of the flag (−). The shortfall is therefore just its negation — NOT
+  // lapsToFlag − value (that treated the delta as absolute laps and fired a
+  // spurious "fuel critical" early in every race).
   if (sts && lap && isRaceSession(ses)) {
     const lapsToFlag = Math.max(0, (ses.totalLaps ?? 0) - lap.currentLapNum);
-    const fuelLaps = sts.fuelRemainingLaps;
-    const deficit = lapsToFlag - fuelLaps;
-    if (deficit >= 0.7 && !mem.fuelCriticalWarned) {
-      emit('normal', 'fuel_critical', `Fuel critical. Estimate ${fuelLaps.toFixed(1)} laps versus ${lapsToFlag} to the flag.`);
+    const shortBy = -sts.fuelRemainingLaps; // laps short of the finish (>0 = short)
+    if (shortBy >= 0.7 && !mem.fuelCriticalWarned) {
+      emit('normal', 'fuel_critical', `Fuel critical. About ${shortBy.toFixed(1)} laps short with ${lapsToFlag} to the flag — save now.`);
       mem.fuelCriticalWarned = true;
-    } else if (deficit >= 0.25 && deficit < 0.7 && !mem.fuelWarned) {
-      emit('normal', 'fuel_warning', `Fuel tight. ${fuelLaps.toFixed(1)} laps in tank, ${lapsToFlag} to go.`);
+    } else if (shortBy >= 0.25 && shortBy < 0.7 && !mem.fuelWarned) {
+      emit('normal', 'fuel_warning', `Fuel tight — about ${shortBy.toFixed(1)} laps short with ${lapsToFlag} to go. Start saving.`);
       mem.fuelWarned = true;
-    } else if (deficit < 0.1) {
+    } else if (shortBy < 0.1) {
       mem.fuelWarned = false;
       mem.fuelCriticalWarned = false;
     }

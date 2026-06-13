@@ -134,7 +134,11 @@ function PedalInputs({ throttle, brake, clutch, steer }: {
         <span className="pedal-value">{clutch}%</span>
       </div>
       <div className="steering-indicator">
-        <div className="steer-bar" style={{ transform: `translateX(${steer * 50}%)` }} />
+        {/* Slide the 12px bar across the 80px track (±34px of travel), centred
+            at steer 0. The bar's own -50% centre offset is folded into the calc
+            so this inline transform doesn't wipe it — overriding it left the bar
+            off-centre with only ±6px of travel, which looked stuck. */}
+        <div className="steer-bar" style={{ transform: `translateX(calc(-50% + ${clamp(steer, -1, 1) * 34}px))` }} />
       </div>
     </div>
   );
@@ -239,7 +243,11 @@ function FuelGauge({ fuelInTank, fuelCapacity, fuelRemainingLaps }: {
       </div>
       <div className="gauge-stats">
         <span>{fuelInTank.toFixed(1)} kg</span>
-        <span>{fuelRemainingLaps.toFixed(1)} laps</span>
+        {/* fuelRemainingLaps is the MFD fuel DELTA (laps of fuel vs. laps left
+            to finish): + = extra in hand, − = short. Show the sign + colour. */}
+        <span style={{ color: fuelRemainingLaps >= 0 ? '#39b54a' : '#dc0000' }}>
+          {fuelRemainingLaps >= 0 ? '+' : ''}{fuelRemainingLaps.toFixed(1)} laps
+        </span>
       </div>
     </div>
   );
