@@ -68,6 +68,7 @@ export function Settings() {
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupResult, setSetupResult] = useState<NetworkSetupResult | null>(null);
   const [showManualSteps, setShowManualSteps] = useState(false);
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
 
   const ptt = usePushToTalk({ onQuery: () => { /* Settings doesn't dispatch; learning only */ } });
 
@@ -84,6 +85,7 @@ export function Settings() {
       if (settings.tts?.enabled != null) setTtsEnabled(settings.tts.enabled);
       if (settings.tts?.voice) setTtsVoice(settings.tts.voice);
       if (settings.tts?.rate != null) { setTtsRate(settings.tts.rate); setSpeechRate(settings.tts.rate); }
+      if (typeof settings.analyticsEnabled === 'boolean') setAnalyticsEnabled(settings.analyticsEnabled);
       // telemetry port is managed by PrefsContext (telemetryPorts[0])
     }).catch(() => {});
     api.getUsage?.().then(setUsage).catch(() => {});
@@ -144,6 +146,12 @@ export function Settings() {
     delete prev.apiKey;
     delete prev.keyValidatedAt;
     await api.saveSettings?.({ ...prev, premium: false });
+  }, []);
+
+  const toggleAnalytics = useCallback(async (enabled: boolean) => {
+    setAnalyticsEnabled(enabled);
+    const prev: any = (await api.loadSettings?.()) ?? {};
+    await api.saveSettings?.({ ...prev, analyticsEnabled: enabled });
   }, []);
 
   const testVoice = useCallback(() => {
@@ -519,6 +527,23 @@ export function Settings() {
             Show Session Timer in sidebar
           </label>
         </div>
+      </div>
+
+      {/* Privacy / Analytics */}
+      <div className="panel" style={{ margin: '0 12px 14px' }}>
+        <h3 className="panel-title">PRIVACY</h3>
+        <div className="settings-field">
+          <label className="toggle-label">
+            <input type="checkbox" checked={analyticsEnabled}
+              onChange={e => toggleAnalytics(e.target.checked)} />
+            Share anonymous usage data
+          </label>
+        </div>
+        <p className="settings-note" style={{ marginTop: 0 }}>
+          Helps us see how many people use Apex Engineer and which versions are live.
+          Anonymous only — an install id, app version, OS, and an "active" heartbeat.
+          No personal data, API keys, or telemetry/race data is ever sent. Saves immediately.
+        </p>
       </div>
 
       {/* Stream Overlay */}

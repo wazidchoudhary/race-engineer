@@ -1,3 +1,4 @@
+mod analytics;
 mod parser;
 mod telemetry;
 mod network;
@@ -551,7 +552,14 @@ fn load_settings(app: AppHandle) -> Value {
 }
 
 #[tauri::command]
-fn save_settings(settings: Value, app: AppHandle) -> Result<(), String> {
+fn save_settings(
+    settings: Value,
+    consent: State<'_, analytics::ConsentCache>,
+    app: AppHandle,
+) -> Result<(), String> {
+    // Keep the analytics consent mirror in sync with the persisted setting
+    // (opt-out: absent/`null` means enabled).
+    consent.set(settings["analyticsEnabled"].as_bool().unwrap_or(true));
     let path = settings_path(&app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -1082,7 +1090,7 @@ pub fn run() {
         usage_cache_creation_tokens: 0,
     }));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -1090,7 +1098,16 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
-            .build())
+            .build());
+
+    // Anonymous usage analytics. Only registered once a real Aptabase App Key is
+    // set (analytics::APP_KEY); registering emits nothing by itself — events are
+    // sent and consent-gated in setup() below.
+    if analytics::is_configured() {
+        builder = builder.plugin(tauri_plugin_aptabase::Builder::new(analytics::APP_KEY).build());
+    }
+
+    builder
         .on_window_event(|window, event| {
             // When the main window is closed, tear down all spawned child
             // windows (driver-*, page-*, overlay) so the app exits cleanly.
@@ -1108,6 +1125,7 @@ pub fn run() {
             }
         })
         .manage(app_state)
+        .manage(analytics::ConsentCache::new(true))
         .invoke_handler(tauri::generate_handler![
             start_telemetry,
             stop_telemetry,
@@ -1142,27 +1160,39 @@ pub fn run() {
             network::open_external_url,
         ])
         .setup(|app| {
-            // Load API key + premium flag from saved settings on startup
-            if let Ok(settings_path) = app.path().app_data_dir()
+            let handle = app.handle().clone();
+
+            // Saved settings blob (may be absent on first run).
+            let settings: Value = app
+                .path()
+                .app_data_dir()
+                .ok()
                 .map(|p| p.join("race-engineer-settings.json"))
+                .and_then(|path| std::fs::read_to_string(&path).ok())
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .unwrap_or_else(|| json!({}));
+
+            // Restore API key + premium flag into app state.
             {
-                if let Ok(raw) = std::fs::read_to_string(&settings_path) {
-                    if let Ok(settings) = serde_json::from_str::<Value>(&raw) {
-                        let key = settings["apiKey"].as_str().unwrap_or("").to_string();
-                        let premium = settings["premium"].as_bool().unwrap_or(false);
-                        let state_handle = app.state::<SafeAppState>();
-                        let app_state: SafeAppState = Arc::clone(&state_handle);
-                        drop(state_handle);
-                        let lock_result = app_state.lock();
-                        if let Ok(mut s) = lock_result {
-                            if !key.is_empty() {
-                                s.api_key = Some(key);
-                            }
-                            s.premium = premium;
-                        }
+                let key = settings["apiKey"].as_str().unwrap_or("").to_string();
+                let premium = settings["premium"].as_bool().unwrap_or(false);
+                if let Ok(mut s) = app.state::<SafeAppState>().lock() {
+                    if !key.is_empty() {
+                        s.api_key = Some(key);
                     }
+                    s.premium = premium;
                 }
             }
+
+            // Anonymous usage analytics — opt-out, defaults on. Consent lives in
+            // the same settings blob (`analyticsEnabled`); save_settings keeps the
+            // cache in sync at runtime. No-op without an App Key.
+            let consent = app.state::<analytics::ConsentCache>().inner().clone();
+            consent.set(settings["analyticsEnabled"].as_bool().unwrap_or(true));
+            if let Ok(dir) = app.path().app_data_dir() {
+                analytics::start(&handle, consent, &dir);
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
