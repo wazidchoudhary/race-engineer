@@ -7,10 +7,10 @@
  * - Optimal pit window based on wear + gaps
  */
 
+import { SafetyCarStatus } from '../types/packets';
 import type { LapData, CarStatus, SessionData } from '../types/packets';
-import type { StintData, PitStrategy } from '../types/store';
-
-const PIT_STOP_TIME_SECONDS = 22; // Average F1 pit stop (in-lane + stationary + out-lane)
+import type { StintData, PitStrategy, WearPrediction } from '../types/store';
+import { pitLossSeconds } from '../track-data/pit-loss-data';
 
 export class StrategyEngine {
   private stints: StintData[] = [];
@@ -49,52 +49,115 @@ export class StrategyEngine {
   }
 
   /**
-   * Calculate virtual pit exit position.
+   * Simulate "if I pit right now, where will I rejoin, and when should I pit?"
    *
-   * Simulates: "If I pit right now, where will I rejoin?"
-   * Uses current gaps + estimated pit loss time.
+   * - Pit loss is per-track ([[pit-loss-data]]), discounted under SC/VSC.
+   * - Rejoin position prefers the game's own `pitStopRejoinPosition`; otherwise
+   *   it is computed from gaps-to-leader (the only gap channel that is
+   *   cumulative from the player), counting how many cars behind would jump
+   *   ahead during the stop.
+   * - When a tyre-wear prediction is available, derives an optimal pit lap from
+   *   the cliff and a fallback window when the game provides none.
    */
   calculatePitRejoin(
     playerLap: LapData,
     allLaps: LapData[],
     playerIdx: number,
     session: SessionData,
+    wearPrediction: WearPrediction | null = null,
   ): PitStrategy {
-    const pitLossMs = PIT_STOP_TIME_SECONDS * 1000;
+    // Per-track pit loss, discounted when a safety car neutralises the field.
+    const baseLossSec = pitLossSeconds(session.trackId);
+    const scFactor =
+      session.safetyCarStatus === SafetyCarStatus.Full ? 0.5 :
+      session.safetyCarStatus === SafetyCarStatus.Virtual ? 0.6 : 1;
+    const pitLossSec = baseLossSec * scFactor;
+    const pitLossMs = pitLossSec * 1000;
+
     const playerPos = playerLap.carPosition;
+    const playerDtl = playerLap.deltaToLeaderMs || 0;
 
-    // Calculate where we'd rejoin
-    let rejoinPosition = playerPos;
-    let rejoinGap: number | null = null;
-
-    // Accumulate gaps behind us
-    let accumulatedGap = 0;
-    const sortedByPosition = allLaps
+    // ── Rejoin estimate from gaps-to-leader (cars that would jump ahead) ──
+    const carsBehind = allLaps
       .map((lap, idx) => ({ lap, idx }))
-      .filter((entry) => entry.lap && entry.lap.resultStatus >= 2 && entry.idx !== playerIdx)
+      .filter((e) => e.lap && e.idx !== playerIdx && e.lap.resultStatus >= 2 && e.lap.carPosition > playerPos)
       .sort((a, b) => a.lap.carPosition - b.lap.carPosition);
 
-    for (const { lap } of sortedByPosition) {
-      if (lap.carPosition > playerPos) {
-        // Car behind us — check if pit loss would put us behind them
-        accumulatedGap += lap.deltaToCarAheadMs;
-        if (accumulatedGap < pitLossMs) {
-          rejoinPosition = lap.carPosition;
-          rejoinGap = (pitLossMs - accumulatedGap) / 1000;
-        } else {
-          break;
-        }
+    let dropped = 0;
+    let gapToCarAheadMs: number | null = null;
+    let haveValidDeltas = playerDtl > 0;
+    for (const { lap } of carsBehind) {
+      const gapBehindMs = (lap.deltaToLeaderMs || 0) - playerDtl;
+      if (gapBehindMs > 0) haveValidDeltas = true;
+      if (gapBehindMs > 0 && gapBehindMs < pitLossMs) {
+        dropped++;
+        gapToCarAheadMs = pitLossMs - gapBehindMs; // we slot in just behind this car
+      } else if (gapBehindMs >= pitLossMs) {
+        break;
       }
     }
 
+    // Prefer the game's own prediction; fall back to our estimate.
+    const gameRejoin = session.pitStopRejoinPosition ?? 0;
+    let rejoinPosition: number | null;
+    let usingGameData = false;
+    if (gameRejoin > 0) {
+      rejoinPosition = gameRejoin;
+      usingGameData = true;
+    } else if (haveValidDeltas) {
+      rejoinPosition = playerPos + dropped;
+    } else {
+      rejoinPosition = null; // no race timing (quali / time trial) — can't tell
+    }
+    const rejoinGap = gapToCarAheadMs != null ? gapToCarAheadMs / 1000 : null;
+
+    // ── Tyre cliff → optimal pit lap ──
+    const currentLap = playerLap.currentLapNum || 0;
+    let lapsLeftOnTyres: number | null = null;
+    let optimalPitLap: number | null = null;
+    if (wearPrediction) {
+      const cliffs = wearPrediction.predictedLapBelow40.filter(
+        (v): v is number => v != null && v > 0,
+      );
+      if (cliffs.length > 0) {
+        const cliffLap = Math.min(...cliffs);
+        lapsLeftOnTyres = Math.max(0, cliffLap - currentLap);
+        optimalPitLap = Math.max(currentLap + 1, cliffLap - 1); // pit ~1 lap before the cliff
+      }
+    }
+
+    // ── Pit window: game value, else a fallback derived from the tyre cliff ──
+    let idealLap = session.pitStopWindowIdealLap || 0;
+    let latestLap = session.pitStopWindowLatestLap || 0;
+    if (idealLap <= 0 && optimalPitLap != null) {
+      idealLap = optimalPitLap;
+      const cliffWindow = lapsLeftOnTyres != null ? currentLap + lapsLeftOnTyres : optimalPitLap + 1;
+      latestLap = Math.max(idealLap, cliffWindow); // never show an inverted window
+    }
+
+    // ── Reason line ──
+    const posLost = rejoinPosition != null ? rejoinPosition - playerPos : 0;
+    let reason: string;
+    if (rejoinPosition == null) {
+      reason = 'Rejoin estimate needs live race timing';
+    } else if (posLost <= 0) {
+      reason = `Pit now → stay P${rejoinPosition} (clear air)`;
+    } else {
+      const places = posLost === 1 ? '1 place' : `${posLost} places`;
+      const gapStr = rejoinGap != null ? `, +${rejoinGap.toFixed(1)}s to car ahead` : '';
+      reason = `Pit now → P${rejoinPosition}, lose ${places}${gapStr}`;
+    }
+
     return {
-      idealLap: session.pitStopWindowIdealLap,
-      latestLap: session.pitStopWindowLatestLap,
+      idealLap,
+      latestLap,
       rejoinPosition,
       rejoinGap,
-      reason: rejoinPosition > playerPos
-        ? `Pit now → rejoin P${rejoinPosition} (${rejoinGap?.toFixed(1)}s behind)`
-        : 'Pit now → rejoin in same position (clear air)',
+      optimalPitLap,
+      lapsLeftOnTyres,
+      pitLossSec: Math.round(pitLossSec * 10) / 10,
+      usingGameData,
+      reason,
     };
   }
 

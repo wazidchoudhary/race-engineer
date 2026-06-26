@@ -72,6 +72,8 @@ export function useIntelligence(state: TelemetryState): IntelligenceData {
   // when the track changes (the analyzer instance lives for the whole app run).
   if (state.session && state.session.trackId !== lastTrackIdRef.current) {
     paceAnalyzer.reset();
+    strategyEngine.reset(); // stints/pace must not leak across sessions/tracks
+    lastLapRef.current = 0;
     lastTrackIdRef.current = state.session.trackId;
   }
   if (state.lapData.length > 0) {
@@ -99,6 +101,7 @@ export function useIntelligence(state: TelemetryState): IntelligenceData {
       state.lapData,
       state.playerCarIndex,
       state.session,
+      wearPrediction,
     );
   }
 

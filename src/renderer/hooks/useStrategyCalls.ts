@@ -48,7 +48,7 @@ export function useStrategyCalls({ src, premium, onDecision }: Opts) {
   const dispatch = useCallback((trigger: StrategyTrigger, question?: string) => {
     if (!premium) return false;
     setState((s) => ({ ...s, pending: true, pendingTrigger: trigger }));
-    return pipeline.request(
+    const accepted = pipeline.request(
       trigger,
       srcRef.current,
       (r) => {
@@ -57,6 +57,13 @@ export function useStrategyCalls({ src, premium, onDecision }: Opts) {
       },
       question,
     );
+    // If the pipeline dropped the call (lower priority than an in-flight one),
+    // the result callback never fires — clear the pending flag so it doesn't
+    // stick on "thinking…" forever.
+    if (!accepted) {
+      setState((s) => ({ ...s, pending: false, pendingTrigger: null }));
+    }
+    return accepted;
   }, [premium, pipeline, onDecision]);
 
   // ── Trigger detection ──

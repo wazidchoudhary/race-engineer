@@ -18,6 +18,7 @@ import React, { useMemo } from 'react';
 import { useTelemetryContext } from '../context/TelemetryContext';
 import { LaunchGuide } from '../components/LaunchGuide';
 import { RadioMessages } from '../components/RadioMessages';
+import { DeltaToBest } from '../components/DeltaToBest';
 import type { TyreArray, CarDamage } from '../../shared/types/packets';
 import type { WearPrediction, ErsAnalysis } from '../../shared/types/store';
 import { ErsRecommendation } from '../../shared/types/store';
@@ -572,6 +573,8 @@ export function Dashboard() {
 
       {/* Row 3: Intelligence panels */}
       <div className="dashboard-row intel-row">
+        <DeltaToBest />
+
         {damage && <DamageMatrix damage={damage} />}
 
         {intelligence.wearPrediction && intelligence.wearPrediction.confidence > 0 && (
@@ -589,11 +592,25 @@ export function Dashboard() {
           <div className="strategy-panel">
             <h3>PIT STRATEGY</h3>
             <div className="strategy-info">
-              <span>Window: Lap {intelligence.pitStrategy.idealLap} - {intelligence.pitStrategy.latestLap}</span>
-              {intelligence.pitStrategy.rejoinPosition && (
+              <span>
+                Window:{' '}
+                {intelligence.pitStrategy.idealLap > 0
+                  ? `Lap ${intelligence.pitStrategy.idealLap} - ${intelligence.pitStrategy.latestLap}`
+                  : '—'}
+              </span>
+              {intelligence.pitStrategy.optimalPitLap != null && (
+                <span>
+                  Optimal: Lap {intelligence.pitStrategy.optimalPitLap}
+                  {intelligence.pitStrategy.lapsLeftOnTyres != null &&
+                    ` (tyres ~${intelligence.pitStrategy.lapsLeftOnTyres} laps left)`}
+                </span>
+              )}
+              <span>Pit loss: {intelligence.pitStrategy.pitLossSec.toFixed(1)}s</span>
+              {intelligence.pitStrategy.rejoinPosition != null && (
                 <span className="rejoin-position">
                   Pit now → P{intelligence.pitStrategy.rejoinPosition}
-                  {intelligence.pitStrategy.rejoinGap !== null && ` (${intelligence.pitStrategy.rejoinGap.toFixed(1)}s gap)`}
+                  {intelligence.pitStrategy.rejoinGap !== null && ` (+${intelligence.pitStrategy.rejoinGap.toFixed(1)}s)`}
+                  {intelligence.pitStrategy.usingGameData ? ' · game' : ' · est'}
                 </span>
               )}
               <span className="strategy-reason">{intelligence.pitStrategy.reason}</span>

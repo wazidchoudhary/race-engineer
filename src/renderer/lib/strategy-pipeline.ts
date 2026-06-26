@@ -10,6 +10,7 @@
  * mutates them — it only reads.
  */
 import { api, type StrategyDecision } from './tauri-api';
+import { pitLossSeconds } from '../../shared/track-data/pit-loss-data';
 
 export type StrategyTrigger =
   | 'lap_complete'
@@ -76,18 +77,6 @@ export interface StrategyResult {
   tookMs: number;
 }
 
-// Per-track pit loss seconds (approximate)
-const PIT_LOSS: Record<number, number> = {
-  5: 19,   // Monaco
-  12: 23,  // Singapore
-  0: 21,   // Melbourne
-  7: 22,   // Silverstone
-  10: 22,  // Spa
-  11: 20,  // Monza
-  15: 21,  // Austin/Texas
-};
-const DEFAULT_PIT_LOSS = 22;
-
 function compoundName(c: number): string {
   switch (c) {
     case 16: return 'soft';
@@ -115,7 +104,7 @@ export function buildSnapshot(src: TelemetrySources): any {
 
   const myPos = playerLap.carPosition || 0;
   const trackId = session.trackId ?? -1;
-  const pitLossSec = PIT_LOSS[trackId] ?? DEFAULT_PIT_LOSS;
+  const pitLossSec = pitLossSeconds(trackId);
 
   function rivalAt(offset: number): any | null {
     if (!Array.isArray(lapData)) return null;
@@ -136,6 +125,7 @@ export function buildSnapshot(src: TelemetrySources): any {
       lastLapSec: ms2s(lap.lastLapTimeMs ?? 0),
       resultStatus: lap.resultStatus ?? 0,
       pitStatus: lap.pitStatus ?? 0,
+      numPitStops: lap.numPitStops ?? 0, // lets the model reason undercut/overcut vs the field
     };
   }
 

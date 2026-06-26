@@ -64,9 +64,11 @@ export interface CoachLiveInput {
   ersDeployedThisLapJ: number;
   ersHarvestedThisLapJ: number;
   ersHarvestLimitJ?: number;
-  ersDeployMode: number; // 0 none, 1 medium, 2 hotlap, 3 boost
+  ersDeployMode: number; // 0 none, 1 medium, 2 hotlap, 3 boost(2026)/overtake(2025)
   overtakeAvailable?: boolean;
   overtakeActive?: boolean;
+  /** True under the 2026 power-unit regs — changes the mode-3 label. */
+  is2026?: boolean;
 }
 
 export interface CoachAdvice {
@@ -175,6 +177,8 @@ export function buildLapPlan(opts: {
   raceMode: 'race' | 'quali';
   harvestLimitJ?: number;
   drsZones?: LapZone[];
+  /** Learned real harvest/lap (J) from previous laps — overrides the static estimate. */
+  measuredHarvestJ?: number;
 }): LapPlan | null {
   const data = ersTrackDataFor(opts.trackId ?? null);
   if (!data) return buildFallbackPlan(opts);
@@ -183,10 +187,14 @@ export function buildLapPlan(opts: {
   const corners = [...data.corners].sort((a, b) => a.pct - b.pct);
   const stance = batteryStance(opts.batteryPct);
 
-  // Expected harvest per lap from the braking zones (capped by the 2026
-  // per-lap harvest limit when the game reports one).
+  // Expected harvest per lap. Start from the static per-braking-zone estimate,
+  // then — once we have observed real harvest for this car/setup/fuel — bias
+  // heavily toward the measured value so the deploy budget tracks reality.
   let expectedHarvestJ = corners.reduce((sum, k) => sum + HARVEST_PER_BRAKE_J[k.braking], 0);
   expectedHarvestJ += 250_000; // partial-throttle / lift recovery around the lap
+  if (opts.measuredHarvestJ && opts.measuredHarvestJ > 0) {
+    expectedHarvestJ = opts.measuredHarvestJ * 0.7 + expectedHarvestJ * 0.3;
+  }
   if (opts.harvestLimitJ && opts.harvestLimitJ > 0) {
     expectedHarvestJ = Math.min(expectedHarvestJ, opts.harvestLimitJ);
   }
@@ -402,6 +410,31 @@ function segContains(seg: PlanSegment, pct: number): boolean {
   return fwd(seg.fromPct, pct) <= fwd(seg.fromPct, seg.toPct);
 }
 
+/** Human label for the live ERS deploy mode (mode 3 differs by regulation). */
+export function deployModeLabel(mode: number, is2026: boolean): string {
+  switch (mode) {
+    case 1: return 'Medium';
+    case 2: return 'Hotlap';
+    case 3: return is2026 ? 'Boost' : 'Overtake';
+    default: return 'None';
+  }
+}
+
+/** Closed-loop correction: compare the driver's actual deploy mode to what the
+ *  current segment wants. Returns '' when they're already doing the right thing. */
+function deployModeNote(seg: PlanSegment | null, mode: number, stance: BatteryStance, is2026: boolean): string {
+  if (!seg) return '';
+  const deploying = mode >= 2; // hotlap / boost = heavy deployment
+  if ((seg.mode === 'lift' || seg.mode === 'corner') && deploying) {
+    const where = seg.mode === 'lift' ? 'a lift-and-coast zone' : 'the corner';
+    return `You're in ${deployModeLabel(mode, is2026)} into ${where} — drop to None, that energy is thrown away here.`;
+  }
+  if (seg.mode === 'boost' && mode === 0 && stance !== 'critical' && stance !== 'low') {
+    return `You're in None on a priority straight — deploy now, you're leaving lap time on the table.`;
+  }
+  return '';
+}
+
 export function adviceAt(plan: LapPlan, input: CoachLiveInput, raceMode: 'race' | 'quali'): CoachAdvice {
   const pct = wrapPct(input.lapDistanceM / plan.lengthM);
   const storePct = (input.ersStoreJ / MAX_ERS_STORE_J) * 100;
@@ -445,9 +478,17 @@ export function adviceAt(plan: LapPlan, input: CoachLiveInput, raceMode: 'race' 
     instruction = 'Follow the lap strip — deploy on the marked exits, harvest everywhere else.';
   }
 
-  // Overtake (Manual Override) bonus call.
+  // Closed-loop correction beats the descriptive plan text (but not the
+  // critical-battery override, which must always win).
+  if (stance !== 'critical') {
+    const note = deployModeNote(segment, input.ersDeployMode, stance, !!input.is2026);
+    if (note) instruction = note;
+  }
+
+  // Overtake (Manual Override) bonus call — in 2026 the leader's electrical
+  // boost tapers from ~290 km/h, so the override pays off at the top end.
   if (input.overtakeAvailable && !input.overtakeActive && stance !== 'critical') {
-    instruction += ' Overtake mode is ARMED — it beats the high-speed taper, use it on the next big straight.';
+    instruction += ' Overtake is ARMED — save it for 290+ km/h on the next big straight, where the car ahead is derating.';
   }
 
   return {

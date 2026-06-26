@@ -56,6 +56,26 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
   const qualiPct = Math.round(storePct / 10) * 10;
   const planBatteryPct = raceMode === 'quali' ? qualiPct : storePct;
   const harvestLimitJ = status?.ersHarvestLimitPerLap || undefined;
+  const is2026 = telemetry2 ? telemetry2.regulations2026 === 1 : false;
+
+  // Per-track learned harvest: loaded from disk on track change, refined each
+  // lap via EMA, and persisted so the next session starts calibrated.
+  const learnedHarvestRef = useRef<number | null>(null);
+  const learnedLapsRef = useRef<number>(0);
+  const [learnedHarvestJ, setLearnedHarvestJ] = useState<number | null>(null);
+  useEffect(() => {
+    const tid = session?.trackId;
+    if (tid == null) return;
+    let cancelled = false;
+    api.loadErsProfile?.(tid).then((p) => {
+      if (cancelled) return;
+      const h = p?.measuredHarvestJ;
+      learnedHarvestRef.current = typeof h === 'number' && h > 0 ? h : null;
+      learnedLapsRef.current = p?.laps ?? 0;
+      setLearnedHarvestJ(learnedHarvestRef.current);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [session?.trackId]);
 
   const plan: LapPlan | null = useMemo(() => {
     if (!session) return null;
@@ -66,6 +86,7 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
       raceMode,
       harvestLimitJ,
       drsZones: session.drsZones,
+      measuredHarvestJ: learnedHarvestJ ?? undefined,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -76,6 +97,7 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
     raceMode,
     harvestLimitJ,
     session?.drsZones?.length,
+    learnedHarvestJ,
   ]);
 
   const advice: CoachAdvice | null = useMemo(() => {
@@ -93,8 +115,9 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
       ersDeployMode: status.ersDeployMode,
       overtakeAvailable: telemetry2 ? telemetry2.overtakeAvailable === 1 : undefined,
       overtakeActive: telemetry2 ? telemetry2.overtakeActive === 1 : undefined,
+      is2026,
     }, raceMode);
-  }, [plan, status, telemetry, telemetry2, playerLap, raceMode, harvestLimitJ]);
+  }, [plan, status, telemetry, telemetry2, playerLap, raceMode, harvestLimitJ, is2026]);
 
   // ── Voice engine ──
   const spokenThisLap = useRef<Set<string>>(new Set());
@@ -130,6 +153,26 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
         });
         pushCall(line, 4, 'coach-lap-summary');
       }
+
+      // Learn from the lap that just ended: EMA the measured harvest and
+      // persist it per track so future sessions start calibrated.
+      if (lastLapNum.current > 0 && prev && prev.harvestedJ > 0) {
+        const prior = learnedHarvestRef.current;
+        const ema = prior == null ? prev.harvestedJ : prior * 0.7 + prev.harvestedJ * 0.3;
+        learnedHarvestRef.current = ema;
+        learnedLapsRef.current += 1;
+        setLearnedHarvestJ(ema);
+        const tid = session?.trackId;
+        if (tid != null) {
+          api.saveErsProfile?.(tid, {
+            trackId: tid,
+            measuredHarvestJ: ema,
+            laps: learnedLapsRef.current,
+            updatedAt: Date.now(),
+          }).catch(() => {});
+        }
+      }
+
       spokenThisLap.current.clear();
       lastLapNum.current = lapNum;
       prevLapStats.current = null;
@@ -189,6 +232,8 @@ export function useBatteryCoach(voiceEnabled: boolean, modeOverride: CoachMode) 
     storePct,
     stance,
     harvestLimitJ,
+    learnedHarvestJ,
+    is2026,
     calls,
     playerLap,
     status,

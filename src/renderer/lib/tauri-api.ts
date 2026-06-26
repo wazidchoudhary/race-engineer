@@ -55,6 +55,12 @@ export const api = {
   listTrackTraces: () =>
     invoke<number[]>('list_track_traces'),
 
+  saveErsProfile: (trackId: number, profile: ErsProfile) =>
+    invoke<{ success: boolean }>('save_ers_profile', { trackId, profile }),
+
+  loadErsProfile: (trackId: number) =>
+    invoke<ErsProfile | null>('load_ers_profile', { trackId }),
+
   // ── Team Telemetry 25 BYO-data import ──────────────────────────────────
   loadTtTrack: (trackId: number, ttPath: string) =>
     invoke<TtTrackData>('load_tt_track', { trackId, ttPath }),
@@ -181,6 +187,16 @@ export interface TrackTrace {
   samples: [number, number][];            // [worldX, worldZ] pairs
   bbox: { minX: number; maxX: number; minZ: number; maxZ: number };
   recordedAt?: string;
+}
+
+/** Learned per-track ERS data the Battery Coach persists between sessions. */
+export interface ErsProfile {
+  trackId: number;
+  /** EMA of measured harvest per lap (Joules). */
+  measuredHarvestJ: number;
+  /** Laps observed so far (for confidence). */
+  laps?: number;
+  updatedAt?: number;
 }
 
 /** Parsed TT data for a single track. `found:false` when the CSVs aren't

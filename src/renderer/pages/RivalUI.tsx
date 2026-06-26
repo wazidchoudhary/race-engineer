@@ -2,6 +2,8 @@ import React, { useMemo } from 'react';
 import { useTelemetryContext } from '../context/TelemetryContext';
 import { usePrefs } from '../context/PrefsContext';
 import { applyNameMasks } from '../lib/name-mask';
+import { useRivalDominance } from '../hooks/useRivalDominance';
+import { DominanceMap } from '../components/DominanceMap';
 import type { LapData } from '../../shared/types/packets';
 
 const COMPOUND_BADGE: Record<number, { label: string; color: string }> = {
@@ -48,6 +50,10 @@ export function Rival() {
       .sort((a, b) => (a.lap.carPosition || 999) - (b.lap.carPosition || 999));
   }, [lapData, participants, playerCarIndex]);
 
+  // Dominance sampler runs every render (hooks must not be conditional); it
+  // no-ops internally until a rival is selected.
+  const dominance = useRivalDominance(playerCarIndex, rivalCarIndex);
+
   if (rivalCarIndex == null) {
     return (
       <div className="rival-picker">
@@ -84,6 +90,8 @@ export function Rival() {
   const playerSts = allCarStatus?.[playerCarIndex];
 
   const rivalName = applyNameMasks(p?.name || `Car ${rivalCarIndex + 1}`, driverNameMasks);
+  const playerP = participants?.participants?.[playerCarIndex];
+  const playerName = applyNameMasks(playerP?.name || 'You', driverNameMasks);
   const gapToPlayer = rivalLap && playerLap
     ? (rivalLap.deltaToLeaderMs || 0) - (playerLap.deltaToLeaderMs || 0)
     : 0;
@@ -118,6 +126,8 @@ export function Rival() {
           {deltaFmt(gapToPlayer)}
         </span>
       </div>
+
+      <DominanceMap data={dominance} playerName={playerName} rivalName={rivalName} />
 
       <div className="rival-grid-compare">
         <div className="panel">

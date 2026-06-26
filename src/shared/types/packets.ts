@@ -212,6 +212,8 @@ export interface SessionData {
   numRedFlagPeriods: number;
   pitStopWindowIdealLap: number;
   pitStopWindowLatestLap: number;
+  /** Game's own predicted rejoin position if you pit now (0 when unavailable). */
+  pitStopRejoinPosition?: number;
   weatherForecast: WeatherForecastSample[];
   forecastAccuracy: number;
   playerCarIndex: number;
@@ -254,6 +256,12 @@ export interface LapData {
   driverStatus: DriverStatus;
   resultStatus: ResultStatus;
   pitLaneTimerActive: number;
+  /** Current time spent in the pit lane (ms) — used to calibrate per-track pit loss. */
+  pitLaneTimeInLaneMs?: number;
+  /** Duration of the actual stationary pit stop (ms). */
+  pitStopTimerMs?: number;
+  /** Whether the car should serve a penalty at this stop. */
+  pitStopShouldServePen?: number;
 }
 
 export interface HistoryLap {

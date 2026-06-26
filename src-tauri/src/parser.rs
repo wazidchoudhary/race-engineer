@@ -121,6 +121,9 @@ pub fn parse_session(d: &[u8], spec: &Spec) -> Option<Value> {
     let safety_car_status = if d.len() > h + 124 { ru8(d, h + 124) } else { 0 };
     let pit_ideal  = if d.len() > h + 653 { ru8(d, h + 653) } else { 0 };
     let pit_latest = if d.len() > h + 654 { ru8(d, h + 654) } else { 0 };
+    // m_pitStopRejoinPosition — game's own predicted rejoin position (in the
+    // format-independent common prefix, valid for both 2025 and 2026).
+    let pit_rejoin = if d.len() > h + 655 { ru8(d, h + 655) } else { 0 };
     let forecast_accuracy = if d.len() > h + 639 { ru8(d, h + 639) } else { 0 };
 
     let mut weather_forecast = Vec::new();
@@ -162,6 +165,7 @@ pub fn parse_session(d: &[u8], spec: &Spec) -> Option<Value> {
         "numRedFlagPeriods":     if d.len() > h + 678 { ru8(d, h + 678) } else { 0 },
         "pitStopWindowIdealLap": pit_ideal,
         "pitStopWindowLatestLap":pit_latest,
+        "pitStopRejoinPosition": pit_rejoin,
         "weatherForecast":       weather_forecast,
         "forecastAccuracy":      forecast_accuracy,
     });
@@ -223,6 +227,10 @@ pub fn parse_lap_data(d: &[u8], spec: &Spec) -> Option<Value> {
             "driverStatus":       ru8(d, o + 44),
             "resultStatus":       ru8(d, o + 45),
             "pitLaneTimerActive": ru8(d, o + 46),
+            // Pit-lane timing the game already computes (within the 57-byte stride).
+            "pitLaneTimeInLaneMs":   ru16(d, o + 47),
+            "pitStopTimerMs":        ru16(d, o + 49),
+            "pitStopShouldServePen": ru8(d, o + 51),
         }));
     }
     if cars.is_empty() { None } else { Some(Value::Array(cars)) }

@@ -308,6 +308,33 @@ fn list_track_traces(app: AppHandle) -> Result<Value, String> {
     Ok(json!(ids))
 }
 
+// ── Per-track ERS profiles ────────────────────────────────────────────────
+// The Battery Coach learns each car/track's real harvest-per-lap and writes it
+// here so the next session starts calibrated instead of from static guesses.
+fn ers_profile_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("ers-profiles"))
+}
+
+#[tauri::command]
+fn save_ers_profile(track_id: i8, profile: Value, app: AppHandle) -> Result<Value, String> {
+    let dir = ers_profile_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.json", track_id));
+    std::fs::write(&path, serde_json::to_string(&profile).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "success": true }))
+}
+
+#[tauri::command]
+fn load_ers_profile(track_id: i8, app: AppHandle) -> Result<Value, String> {
+    let path = ers_profile_dir(&app)?.join(format!("{}.json", track_id));
+    match std::fs::read_to_string(&path) {
+        Ok(s) => serde_json::from_str(&s).map_err(|e| e.to_string()),
+        Err(_) => Ok(Value::Null),
+    }
+}
+
 // ── Team Telemetry 25 BYO-data import ─────────────────────────────────────────
 // Reads the user's locally-installed TT data from the path they configure.
 // Files are NOT copied into our app — we read them on demand only.
@@ -1138,6 +1165,8 @@ pub fn run() {
             save_track_trace,
             load_track_trace,
             list_track_traces,
+            save_ers_profile,
+            load_ers_profile,
             load_tt_track,
             set_lan_relay,
             set_manual_track,

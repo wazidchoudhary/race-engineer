@@ -120,6 +120,14 @@ export interface PitStrategy {
   rejoinPosition: number | null;    // Virtual ghost pit exit position
   rejoinGap: number | null;         // seconds behind car you'd rejoin behind
   reason: string;
+  /** Recommended lap to pit, derived from the tyre cliff (null if unknown). */
+  optimalPitLap: number | null;
+  /** Laps until the tyres fall off the cliff (<40% grip). */
+  lapsLeftOnTyres: number | null;
+  /** Effective pit-loss used (seconds), after any SC/VSC discount. */
+  pitLossSec: number;
+  /** True when rejoinPosition comes from the game's own prediction. */
+  usingGameData: boolean;
 }
 
 // ── Brake Bias History ──
